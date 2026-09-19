@@ -140,6 +140,9 @@ class SettingsStore(
         val WEB_SERVER_ACCESS_PASSWORD = stringPreferencesKey("web_server_access_password")
         val WEB_SERVER_LOCALHOST_ONLY = booleanPreferencesKey("web_server_localhost_only")
 
+        // 后台常驻（常驻通知）
+        val BACKGROUND_RUNNING_ENABLED = booleanPreferencesKey("background_running_enabled")
+
         // 提示词注入
         val MODE_INJECTIONS = stringPreferencesKey("mode_injections")
         val LOREBOOKS = stringPreferencesKey("lorebooks")
@@ -215,6 +218,7 @@ class SettingsStore(
                 preferences[WEB_SERVER_JWT_ENABLED] = settings.webServerJwtEnabled
                 preferences[WEB_SERVER_ACCESS_PASSWORD] = settings.webServerAccessPassword
                 preferences[WEB_SERVER_LOCALHOST_ONLY] = settings.webServerLocalhostOnly
+                preferences[BACKGROUND_RUNNING_ENABLED] = settings.backgroundRunningEnabled
                 preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
                 preferences[LAUNCH_COUNT] = settings.launchCount
                 preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
@@ -310,6 +314,7 @@ class SettingsStore(
                 webServerJwtEnabled = preferences[WEB_SERVER_JWT_ENABLED] == true,
                 webServerAccessPassword = preferences[WEB_SERVER_ACCESS_PASSWORD] ?: "",
                 webServerLocalhostOnly = preferences[WEB_SERVER_LOCALHOST_ONLY] == true,
+                backgroundRunningEnabled = preferences[BACKGROUND_RUNNING_ENABLED] == true,
                 backupReminderConfig = preferences[BACKUP_REMINDER_CONFIG]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: BackupReminderConfig(),
@@ -563,6 +568,8 @@ data class Settings(
     val webServerJwtEnabled: Boolean = false,
     val webServerAccessPassword: String = "",
     val webServerLocalhostOnly: Boolean = false,
+    /** 是否开启「后台持续运行」（常驻通知 + 前台服务保活）。 */
+    val backgroundRunningEnabled: Boolean = false,
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
     val launchCount: Int = 0,
     val sponsorAlertDismissedAt: Int = 0,

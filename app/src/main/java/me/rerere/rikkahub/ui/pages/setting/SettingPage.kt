@@ -55,6 +55,7 @@ import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.ImageUpload
 import me.rerere.hugeicons.stroke.InLove
 import me.rerere.hugeicons.stroke.LookTop
+import me.rerere.hugeicons.stroke.Rocket01
 import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.hugeicons.stroke.Megaphone01
 import me.rerere.hugeicons.stroke.Package
@@ -244,6 +245,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         leadingContent = { Icon(HugeIcons.ServerStack01, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_web_server_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_web_server)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingBackgroundRunning) },
+                        leadingContent = { Icon(HugeIcons.Rocket01, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_background_running_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_background_running)) },
                     )
                 }
             }

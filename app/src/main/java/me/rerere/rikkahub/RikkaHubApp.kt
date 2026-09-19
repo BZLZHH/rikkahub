@@ -34,6 +34,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.sync.BackupManager
 import me.rerere.rikkahub.data.sync.RestoreFailedException
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.service.BackgroundKeepAliveService
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.DatabaseUtil
@@ -50,6 +51,7 @@ private const val TAG = "RikkaHubApp"
 const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
+const val BACKGROUND_KEEP_ALIVE_NOTIFICATION_CHANNEL_ID = "background_keep_alive"
 
 class RikkaHubApp : Application() {
     override fun onCreate() {
@@ -97,6 +99,9 @@ class RikkaHubApp : Application() {
 
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()
+
+        // Restore the persistent background-running notification if enabled
+        startBackgroundKeepAliveIfEnabled()
 
         // Increment launch count
         incrementLaunchCount()
@@ -205,6 +210,30 @@ class RikkaHubApp : Application() {
         }
     }
 
+    private fun startBackgroundKeepAliveIfEnabled() {
+        get<AppScope>().launch {
+            runCatching {
+                delay(500)
+                val settings = get<SettingsStore>().settingsFlowRaw.first()
+                if (!settings.backgroundRunningEnabled) {
+                    return@runCatching
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(
+                        this@RikkaHubApp,
+                        android.Manifest.permission.POST_NOTIFICATIONS
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    Log.w(TAG, "startBackgroundKeepAliveIfEnabled: notification permission not granted, skipping")
+                    return@runCatching
+                }
+                BackgroundKeepAliveService.start(this@RikkaHubApp)
+            }.onFailure {
+                Log.e(TAG, "startBackgroundKeepAliveIfEnabled failed", it)
+            }
+        }
+    }
+
     private fun createNotificationChannel() {
         val notificationManager = NotificationManagerCompat.from(this)
         val chatCompletedChannel = NotificationChannelCompat
@@ -234,12 +263,25 @@ class RikkaHubApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(webServerChannel)
+
+        // 常驻通知渠道：静默、低优先级，不出现在锁屏横幅里，也不震动
+        val backgroundKeepAliveChannel = NotificationChannelCompat
+            .Builder(
+                BACKGROUND_KEEP_ALIVE_NOTIFICATION_CHANNEL_ID,
+                NotificationManagerCompat.IMPORTANCE_LOW
+            )
+            .setName(getString(R.string.notification_channel_background_keep_alive))
+            .setVibrationEnabled(false)
+            .setShowBadge(false)
+            .build()
+        notificationManager.createNotificationChannel(backgroundKeepAliveChannel)
     }
 
     override fun onTerminate() {
         super.onTerminate()
         get<AppScope>().cancel()
         stopService(Intent(this, WebServerService::class.java))
+        stopService(Intent(this, BackgroundKeepAliveService::class.java))
     }
 }
 
