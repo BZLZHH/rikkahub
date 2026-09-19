@@ -271,6 +271,10 @@ class RouteActivity : ComponentActivity() {
         )
 
         val backStack = rememberNavBackStack(startScreen)
+        // NavDisplay 在空 backstack 上会直接抛 IllegalArgumentException("NavDisplay backstack cannot be empty")。
+        // 返回手势（含 predictive back）在根页面 / 快速连按时有概率把最后一层弹掉, 这里做兜底:
+        // 传给 NavDisplay 的列表永不为空, 真实栈仍由 onBack 维护。
+        val displayBackStack: List<NavKey> = if (backStack.isEmpty()) listOf(startScreen) else backStack
         SideEffect {
             navStack = backStack
             while (pendingIntents.isNotEmpty()) {
@@ -302,13 +306,20 @@ class RouteActivity : ComponentActivity() {
                         .background(MaterialTheme.colorScheme.background)
                 ) {
                     NavDisplay(
-                        backStack = backStack,
+                        backStack = displayBackStack,
                         entryDecorators = listOf(
                             rememberSaveableStateHolderNavEntryDecorator(),
                             rememberViewModelStoreNavEntryDecorator(),
                         ),
                         modifier = Modifier.fillMaxSize(),
-                        onBack = { backStack.removeLastOrNull() },
+                        onBack = {
+                            if (backStack.size > 1) {
+                                backStack.removeLastOrNull()
+                            } else {
+                                // 根页面: 退到后台而不是退出, 避免清空 backstack, 也保住正在跑的后台任务
+                                moveTaskToBack(true)
+                            }
+                        },
                         transitionSpec = {
                             if (backStack.size == 1) fadeIn() togetherWith fadeOut()
                             else {
