@@ -1429,4 +1429,23 @@
   <string name="notification_background_keep_alive_uptime">Uptime: %1$s</string>
   <string name="notification_background_keep_alive_uptime_unknown">Uptime: -</string>
   <string name="notification_background_keep_alive_stop">Stop</string>
+  <string name="notification_channel_workspace_jobs">Background jobs</string>
+  <string name="job_notification_succeeded">Finished</string>
+  <string name="job_notification_failed">Failed</string>
+  <string name="job_notification_killed">Stopped</string>
+  <string name="job_notification_timed_out">Timed out</string>
+  <string name="job_notification_interrupted">Interrupted (app was killed)</string>
+  <string name="job_notification_deferred">Deferred by the system. It will run once background running is enabled.</string>
+  <string name="workspace_detail_tab_jobs">Jobs</string>
+  <string name="workspace_jobs_running_title">Jobs</string>
+  <string name="workspace_jobs_empty">No jobs yet. Ask the assistant to start one with job_start.</string>
+  <string name="workspace_jobs_defs_title">Job definitions</string>
+  <string name="workspace_jobs_defs_empty">No saved job definitions.</string>
+  <string name="workspace_jobs_stop">Stop</string>
+  <string name="workspace_jobs_delete">Delete</string>
+  <string name="workspace_jobs_run_now">Run now</string>
+  <string name="workspace_jobs_clear_finished">Clear finished</string>
+  <string name="workspace_jobs_status">Status</string>
+  <string name="workspace_jobs_logs_empty">(no output yet)</string>
+  <string name="workspace_jobs_close">Close</string>
 </resources>

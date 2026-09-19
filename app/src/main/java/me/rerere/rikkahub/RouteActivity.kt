@@ -247,6 +247,8 @@ class RouteActivity : ComponentActivity() {
                     is AppEvent.OpenUsageAccessSettings -> this@RouteActivity.openUsageAccessSettings()
                     is AppEvent.ChatGenerationUpdate -> Unit // 由 ChatNotificationManager 消费
                     is AppEvent.ChatGenerationEnded -> Unit // 由 ChatNotificationManager 消费
+                    is AppEvent.WorkspaceJobFinished -> Unit // 由任务通知/唤醒管理器消费
+                    is AppEvent.WorkspaceJobDeferred -> Unit // 由任务通知管理器消费
                 }
             }
         }

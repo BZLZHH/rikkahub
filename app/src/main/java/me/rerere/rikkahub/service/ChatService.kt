@@ -699,6 +699,8 @@ class ChatService(
                     assistant = assistant,
                     model = model,
                     workspaceCwd = conversation.workspaceCwd,
+                    // 后台任务用它记录"完成后唤醒哪个会话"
+                    conversationId = conversationId.toString(),
                 )
             } catch (error: InvalidMcpServerNamesException) {
                 sessions[conversationId]?.messageQueue?.pause()

@@ -15,6 +15,8 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <!-- 定时任务尽量精确到分钟; 用户未授权时自动退化为非精确闹钟 -->
+  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
   <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
   <uses-permission
@@ -141,6 +143,12 @@
         android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
         android:value="keep the app process alive for background chat generation and notifications" />
     </service>
+
+    <!-- 后台任务的定时触发器（AlarmManager 单次闹钟 + 触发后重排） -->
+    <receiver
+      android:name=".service.JobScheduleReceiver"
+      android:enabled="true"
+      android:exported="false" />
 
     <receiver
       android:name=".service.BootCompletedReceiver"

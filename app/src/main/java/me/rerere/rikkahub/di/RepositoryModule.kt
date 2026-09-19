@@ -12,6 +12,7 @@ import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.ProotShellRunner
+import me.rerere.workspace.WorkspaceJobRunner
 import me.rerere.workspace.RootfsInstaller
 import me.rerere.workspace.WorkspaceBindMount
 import me.rerere.workspace.WorkspaceManager
@@ -48,6 +49,10 @@ val repositoryModule = module {
         WorkspaceManager(
             baseDir = File(context.filesDir, "workspaces"),
             shellRunner = ProotShellRunner(
+                nativeLibraryDir = File(context.applicationInfo.nativeLibraryDir),
+            ),
+            // 后台任务用独立的启动器: 同一个 proot 二进制, 但不等结果、输出直接落盘
+            jobRunner = WorkspaceJobRunner(
                 nativeLibraryDir = File(context.applicationInfo.nativeLibraryDir),
             ),
             // 同一份挂载表既用于 PRoot 的 -b 参数, 也用于文件工具的路径解析, 避免两处漂移

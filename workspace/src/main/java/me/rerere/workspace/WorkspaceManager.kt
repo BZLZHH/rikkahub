@@ -11,6 +11,8 @@ class WorkspaceManager(
     private val config: WorkspaceConfig = WorkspaceConfig(),
     private val shellRunner: WorkspaceShellRunner = HostShellRunner(),
     private val bindMounts: List<WorkspaceBindMount> = emptyList(),
+    /** 后台任务启动器; 未配置时 [startJob] 会抛错（文件工具与同步执行不受影响）。 */
+    private val jobRunner: WorkspaceJobRunner? = null,
 ) {
     private val fileSystem = WorkspaceFileSystem(config)
 
@@ -215,6 +217,47 @@ class WorkspaceManager(
                 bindMounts = bindMounts,
                 shellCompatibilityMode = shellCompatibilityMode,
             )
+        )
+    }
+
+    /**
+     * 启动一个后台任务进程: 不等待、输出直接写进调用方给的流。
+     *
+     * 与 [executeCommand] 共用同一套 rootfs / 挂载 / cwd 约定与命令行构造, 差异只在生命周期:
+     * 超时、并发与状态管理由 Android 侧的任务管理器负责。
+     */
+    fun startJob(
+        root: String,
+        command: String,
+        cwd: String = "",
+        stdout: OutputStream,
+        stderr: OutputStream,
+        env: Map<String, String> = emptyMap(),
+        shellCompatibilityMode: Boolean = false,
+    ): RunningWorkspaceJob {
+        require(command.isNotBlank()) { "Command is required" }
+        val runner = requireNotNull(jobRunner) { "Job runner is not configured" }
+        val workingDir = fileSystem.resolve(filesDir(root), cwd)
+        require(workingDir.exists()) { "Working directory does not exist: $cwd" }
+        require(workingDir.isDirectory) { "Working path is not a directory: $cwd" }
+
+        return runner.start(
+            context = WorkspaceShellContext(
+                root = root,
+                command = command,
+                cwd = cwd,
+                filesDir = filesDir(root),
+                linuxDir = linuxDir(root),
+                tempDir = tempDir(root),
+                workingDir = workingDir,
+                timeoutMillis = 0L,
+                stdin = null,
+                bindMounts = bindMounts,
+                shellCompatibilityMode = shellCompatibilityMode,
+            ),
+            stdout = stdout,
+            stderr = stderr,
+            extraEnv = env,
         )
     }
 

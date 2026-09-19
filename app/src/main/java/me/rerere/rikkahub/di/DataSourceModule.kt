@@ -92,6 +92,10 @@ val dataSourceModule = module {
     }
 
     single {
+        get<AppDatabase>().workspaceJobDao()
+    }
+
+    single {
         get<AppDatabase>().folderDao()
     }
 

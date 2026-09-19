@@ -8,6 +8,10 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.event.AppEventBus
+import me.rerere.rikkahub.data.job.JobScheduleEngine
+import me.rerere.rikkahub.data.job.JobWakeCoordinator
+import me.rerere.rikkahub.data.job.WorkspaceJobManager
+import me.rerere.rikkahub.service.WorkspaceJobNotificationManager
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalSessionManager
@@ -66,6 +70,47 @@ val appModule = module {
         WorkspaceTerminalSessionManager(get(), get())
     }
 
+    // 后台任务: job_* 工具、UI、调度器共用的唯一入口
+    single {
+        WorkspaceJobManager(
+            context = get(),
+            appScope = get(),
+            dao = get(),
+            workspaceDao = get(),
+            workspaceManager = get(),
+            settingsStore = get(),
+            eventBus = get(),
+        )
+    }
+
+    single {
+        JobScheduleEngine(
+            context = get(),
+            appScope = get(),
+            dao = get(),
+            manager = get(),
+            eventBus = get(),
+        )
+    }
+
+    // 完成/延后通知（createdAtStart: 进程启动即订阅, 否则后台完成的事件会丢）
+    single(createdAtStart = true) {
+        WorkspaceJobNotificationManager(
+            context = get(),
+            appScope = get(),
+            eventBus = get(),
+        )
+    }
+
+    // 完成自动唤醒 AI 续聊
+    single(createdAtStart = true) {
+        JobWakeCoordinator(
+            appScope = get(),
+            eventBus = get(),
+            dao = get(),
+        )
+    }
+
     // 生成通知与业务解耦：ChatService 只发事件，通知由这里消费；
     // createdAtStart 保证进程启动即订阅，否则后台生成的事件会因无订阅者而丢失
     single(createdAtStart = true) {
@@ -86,6 +131,9 @@ val appModule = module {
             mcpManager = get(),
             skillManager = get(),
             workspaceRepository = get(),
+            jobManager = get(),
+            scheduleEngine = get(),
+            jobDao = get(),
         )
     }
 

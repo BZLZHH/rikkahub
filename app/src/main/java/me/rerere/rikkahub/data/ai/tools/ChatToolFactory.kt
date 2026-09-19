@@ -8,6 +8,9 @@ import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
+import me.rerere.rikkahub.data.db.dao.WorkspaceJobDAO
+import me.rerere.rikkahub.data.job.JobScheduleEngine
+import me.rerere.rikkahub.data.job.WorkspaceJobManager
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.model.Assistant
@@ -34,12 +37,16 @@ class ChatToolFactory(
     private val mcpManager: McpManager,
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
+    private val jobManager: WorkspaceJobManager,
+    private val scheduleEngine: JobScheduleEngine,
+    private val jobDao: WorkspaceJobDAO,
 ) {
     suspend fun createTools(
         settings: Settings,
         assistant: Assistant,
         model: Model,
         workspaceCwd: String? = null,
+        conversationId: String? = null,
     ): List<Tool> = buildList {
         if (assistant.enableMemory) {
             val memoryAssistantId = if (assistant.useGlobalMemory) {
@@ -63,7 +70,14 @@ class ChatToolFactory(
         if (assistant.enableRecentChatsReference) {
             addAll(createConversationTools(conversationRepository, assistant.id))
         }
-        addAll(createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), workspaceCwd))
+        addAll(
+            createWorkspaceToolsIfReady(
+                workspaceId = assistant.workspaceId?.toString(),
+                cwd = workspaceCwd,
+                conversationId = conversationId,
+                assistantId = assistant.id.toString(),
+            )
+        )
         if (assistant.enabledSkills.isNotEmpty()) {
             addAll(
                 createSkillTools(
@@ -94,7 +108,12 @@ class ChatToolFactory(
         }
     }
 
-    private suspend fun createWorkspaceToolsIfReady(workspaceId: String?, cwd: String?): List<Tool> {
+    private suspend fun createWorkspaceToolsIfReady(
+        workspaceId: String?,
+        cwd: String?,
+        conversationId: String?,
+        assistantId: String?,
+    ): List<Tool> {
         if (workspaceId.isNullOrBlank()) return emptyList()
         val workspace = workspaceRepository.getById(workspaceId) ?: return emptyList()
         if (workspace.shellStatus != WorkspaceShellStatus.READY.name) {
@@ -104,6 +123,18 @@ class ChatToolFactory(
             )
             return emptyList()
         }
-        return createWorkspaceTools(workspaceId, workspaceRepository, cwd)
+        return createWorkspaceTools(
+            workspaceId = workspaceId,
+            workspaceRepository = workspaceRepository,
+            cwd = cwd,
+            jobContext = JobToolContext(
+                workspaceId = workspaceId,
+                conversationId = conversationId,
+                assistantId = assistantId,
+                manager = jobManager,
+                scheduleEngine = scheduleEngine,
+                dao = jobDao,
+            ),
+        )
     }
 }

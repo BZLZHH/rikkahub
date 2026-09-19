@@ -25,6 +25,11 @@ internal fun createWorkspaceTerminalSession(
     root: String,
     client: TerminalSessionClient,
     shellCompatibilityMode: Boolean,
+    /** 非空时在 pty 里直接执行该命令（后台任务用）; 为空则是普通交互式 shell */
+    command: String? = null,
+    /** 命令的工作目录（workspace files 相对路径） */
+    cwd: String? = null,
+    extraEnv: Map<String, String> = emptyMap(),
 ): TerminalSession {
     val appContext = context.applicationContext
     val workspaceDir = File(File(appContext.filesDir, "workspaces"), root)
@@ -67,12 +72,29 @@ internal fun createWorkspaceTerminalSession(
         "SHELL=/bin/bash",
         "/bin/bash",
     )
+    if (command != null) {
+        val prootCwd = if (cwd.isNullOrBlank()) {
+            WORKSPACE_DIR
+        } else {
+            "$WORKSPACE_DIR/" + cwd.trim('/')
+        }
+        args += listOf(
+            "-l",
+            "-c",
+            "cd -- \"\$1\" && eval \"\$2\"",
+            "rikkahub",
+            prootCwd,
+            command,
+        )
+    }
 
     val env = mutableListOf(
         "PROOT_LOADER=${loader.absolutePath}",
         "PROOT_TMP_DIR=${tempDir.absolutePath}",
         "TMPDIR=${tempDir.absolutePath}",
     )
+
+    extraEnv.forEach { (key, value) -> env += "$key=$value" }
 
     if (shellCompatibilityMode) {
         env += "PROOT_NO_SECCOMP=1"

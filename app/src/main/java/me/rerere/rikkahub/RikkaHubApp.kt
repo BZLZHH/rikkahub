@@ -34,6 +34,8 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.sync.BackupManager
 import me.rerere.rikkahub.data.sync.RestoreFailedException
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.data.job.JobScheduleEngine
+import me.rerere.rikkahub.data.job.WorkspaceJobManager
 import me.rerere.rikkahub.service.BackgroundKeepAliveService
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
@@ -52,6 +54,7 @@ const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
 const val BACKGROUND_KEEP_ALIVE_NOTIFICATION_CHANNEL_ID = "background_keep_alive"
+const val WORKSPACE_JOB_NOTIFICATION_CHANNEL_ID = "workspace_jobs"
 
 class RikkaHubApp : Application() {
     override fun onCreate() {
@@ -102,6 +105,9 @@ class RikkaHubApp : Application() {
 
         // Restore the persistent background-running notification if enabled
         startBackgroundKeepAliveIfEnabled()
+
+        // 后台任务: 中断记录收尾 + 补跑 deferred + 重排定时任务
+        initWorkspaceJobs()
 
         // Increment launch count
         incrementLaunchCount()
@@ -234,6 +240,17 @@ class RikkaHubApp : Application() {
         }
     }
 
+    private fun initWorkspaceJobs() {
+        get<AppScope>().launch {
+            runCatching {
+                get<WorkspaceJobManager>().reconcileOnStart()
+                get<JobScheduleEngine>().rescheduleAll()
+            }.onFailure {
+                Log.e(TAG, "initWorkspaceJobs failed", it)
+            }
+        }
+    }
+
     private fun createNotificationChannel() {
         val notificationManager = NotificationManagerCompat.from(this)
         val chatCompletedChannel = NotificationChannelCompat
@@ -275,6 +292,18 @@ class RikkaHubApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(backgroundKeepAliveChannel)
+
+        // 后台任务通知渠道: 完成/失败/被系统延后
+        val workspaceJobChannel = NotificationChannelCompat
+            .Builder(
+                WORKSPACE_JOB_NOTIFICATION_CHANNEL_ID,
+                NotificationManagerCompat.IMPORTANCE_DEFAULT
+            )
+            .setName(getString(R.string.notification_channel_workspace_jobs))
+            .setVibrationEnabled(false)
+            .setShowBadge(true)
+            .build()
+        notificationManager.createNotificationChannel(workspaceJobChannel)
     }
 
     override fun onTerminate() {

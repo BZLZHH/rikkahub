@@ -28,7 +28,7 @@ val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_write_file" to false,
     "workspace_edit_file" to false,
     "workspace_shell" to true,
-)
+) + JobToolDefaultApprovals
 
 fun resolveWorkspaceToolApproval(name: String, overrides: Map<String, Boolean>): Boolean =
     overrides[name] ?: WorkspaceToolDefaultApprovals[name] ?: false
@@ -37,6 +37,8 @@ suspend fun createWorkspaceTools(
     workspaceId: String?,
     workspaceRepository: WorkspaceRepository,
     cwd: String? = null,
+    /** 非空时追加 job_* 后台任务工具（按 workspace 绑定注入） */
+    jobContext: JobToolContext? = null,
 ): List<Tool> {
     if (workspaceId.isNullOrBlank()) return emptyList()
     val approvalOverrides = workspaceRepository.getById(workspaceId)?.toolApprovalOverrides().orEmpty()
@@ -44,12 +46,15 @@ suspend fun createWorkspaceTools(
 
     val shellCwd = cwd?.removePrefix("/workspace/")?.removePrefix("/workspace")
 
-    return listOf(
-        createReadFileTool(workspaceId, ::needsApproval, workspaceRepository),
-        createWriteFileTool(workspaceId, ::needsApproval, workspaceRepository),
-        createEditFileTool(workspaceId, ::needsApproval, workspaceRepository),
-        createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd),
-    )
+    return buildList {
+        add(createReadFileTool(workspaceId, ::needsApproval, workspaceRepository))
+        add(createWriteFileTool(workspaceId, ::needsApproval, workspaceRepository))
+        add(createEditFileTool(workspaceId, ::needsApproval, workspaceRepository))
+        add(createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd))
+        if (jobContext != null) {
+            addAll(createJobTools(jobContext, ::needsApproval))
+        }
+    }
 }
 
 private val IMAGE_EXTENSIONS = setOf(

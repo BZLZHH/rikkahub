@@ -67,6 +67,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowTurnBackward
 import me.rerere.hugeicons.stroke.Bash
 import me.rerere.hugeicons.stroke.ComputerTerminal01
+import me.rerere.hugeicons.stroke.Cpu
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.FileImport
@@ -105,7 +106,7 @@ fun WorkspaceDetailPage(id: String) {
     val installProgress by vm.installProgress.collectAsStateWithLifecycle()
     val installError by vm.installError.collectAsStateWithLifecycle()
     val settingsError by vm.settingsError.collectAsStateWithLifecycle()
-    val pagerState = rememberPagerState { 2 }
+    val pagerState = rememberPagerState { 3 }
     val scope = rememberCoroutineScope()
     var deleteTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
     var showInstallDialog by remember { mutableStateOf(false) }
@@ -184,6 +185,12 @@ fun WorkspaceDetailPage(id: String) {
                     icon = { Icon(HugeIcons.File02, contentDescription = null) },
                     onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
                 )
+                NavigationBarItem(
+                    selected = pagerState.currentPage == 2,
+                    label = { Text(stringResource(R.string.workspace_detail_tab_jobs)) },
+                    icon = { Icon(HugeIcons.Cpu, contentDescription = null) },
+                    onClick = { scope.launch { pagerState.animateScrollToPage(2) } },
+                )
             }
         },
         containerColor = CustomColors.topBarColors.containerColor,
@@ -202,6 +209,8 @@ fun WorkspaceDetailPage(id: String) {
                     onToolApprovalChange = vm::setToolApproval,
                     onShellCompatibilityModeChange = vm::setShellCompatibilityMode,
                 )
+
+                2 -> WorkspaceJobsTab(workspaceId = id)
 
                 1 -> WorkspaceFilesPage(
                     state = state,
