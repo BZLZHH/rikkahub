@@ -1448,4 +1448,14 @@
   <string name="workspace_jobs_status">Status</string>
   <string name="workspace_jobs_logs_empty">(no output yet)</string>
   <string name="workspace_jobs_close">Close</string>
+  <string name="jobs_page_title">Jobs</string>
+  <string name="jobs_page_running_count">Running: %1$d / %2$d</string>
+  <string name="jobs_page_filter_all">All jobs</string>
+  <string name="jobs_page_filter_running">Running only</string>
+  <string name="jobs_page_filter_hint">Tap a job to follow its live log, or stop/delete it.</string>
+  <string name="jobs_page_filter_conversation">Scope</string>
+  <string name="jobs_page_filter_conversation_hint">Limit the list to jobs started from this conversation.</string>
+  <string name="jobs_page_filter_conversation_chip">This chat</string>
+  <string name="job_notification_running_title">%1$d background job(s) running</string>
+  <string name="notification_background_keep_alive_jobs">%1$d background job(s) running</string>
 </resources>

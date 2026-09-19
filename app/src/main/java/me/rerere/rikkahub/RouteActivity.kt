@@ -100,6 +100,7 @@ import me.rerere.workspace.WorkspaceStorageArea
 import me.rerere.rikkahub.ui.pages.favorite.FavoritePage
 import me.rerere.rikkahub.ui.pages.history.HistoryPage
 import me.rerere.rikkahub.ui.pages.imggen.ImageGenPage
+import me.rerere.rikkahub.ui.pages.jobs.JobsPage
 import me.rerere.rikkahub.ui.pages.log.LogPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
@@ -225,7 +226,10 @@ class RouteActivity : ComponentActivity() {
             Intent.ACTION_PROCESS_TEXT -> Screen.ShareHandler(
                 text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty(),
             )
-            else -> intent.getStringExtra("conversationId")?.let { Screen.Chat(it) }
+            else -> when {
+                intent.getBooleanExtra("openJobs", false) -> Screen.Jobs()
+                else -> intent.getStringExtra("conversationId")?.let { Screen.Chat(it) }
+            }
         }
         if (destination != null && backStack.lastOrNull() != destination) {
             backStack.add(destination)
@@ -247,6 +251,7 @@ class RouteActivity : ComponentActivity() {
                     is AppEvent.OpenUsageAccessSettings -> this@RouteActivity.openUsageAccessSettings()
                     is AppEvent.ChatGenerationUpdate -> Unit // 由 ChatNotificationManager 消费
                     is AppEvent.ChatGenerationEnded -> Unit // 由 ChatNotificationManager 消费
+                    is AppEvent.WorkspaceJobStarted -> Unit // 由任务通知管理器消费
                     is AppEvent.WorkspaceJobFinished -> Unit // 由任务通知/唤醒管理器消费
                     is AppEvent.WorkspaceJobDeferred -> Unit // 由任务通知管理器消费
                 }
@@ -536,6 +541,10 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.Stats> {
                                 StatsPage()
                             }
+
+                            entry<Screen.Jobs> { key ->
+                                JobsPage(conversationId = key.conversationId)
+                            }
                         }
                     )
                     if (BuildConfig.DEBUG) {
@@ -741,4 +750,8 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Stats : Screen
+
+    /** 全局后台任务页; conversationId 非空时默认过滤到该会话发起的任务 */
+    @Serializable
+    data class Jobs(val conversationId: String? = null) : Screen
 }

@@ -18,6 +18,13 @@ sealed class AppEvent {
      * 聊天生成结束（完成、失败或取消）。
      * [contentPreview] 为 null 时仅取消 Live Update 通知，不发送完成通知。
      */
+    /** 后台任务开始运行。 */
+    data class WorkspaceJobStarted(
+        val jobId: String,
+        val workspaceId: String,
+        val name: String,
+    ) : AppEvent()
+
     /** 后台任务结束（成功/失败/被杀/超时/中断）。 */
     data class WorkspaceJobFinished(
         val jobId: String,

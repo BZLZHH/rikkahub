@@ -99,6 +99,7 @@ val appModule = module {
             context = get(),
             appScope = get(),
             eventBus = get(),
+            dao = get(),
         )
     }
 

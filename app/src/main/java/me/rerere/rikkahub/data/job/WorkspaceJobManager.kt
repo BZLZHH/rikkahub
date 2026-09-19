@@ -284,6 +284,7 @@ class WorkspaceJobManager(
             deferredReason = null,
         )
         dao.upsertJob(started)
+        eventBus.tryEmit(AppEvent.WorkspaceJobStarted(started.id, started.workspaceId, started.name))
         ensureKeepAlive()
 
         return if (WorkspaceJobMode.from(started.mode) == WorkspaceJobMode.PTY) {
@@ -509,6 +510,11 @@ class WorkspaceJobManager(
     fun jobsFlow(workspaceId: String, limit: Int = 50) = dao.listJobsFlow(workspaceId, limit)
 
     fun defsFlow(workspaceId: String) = dao.listDefsFlow(workspaceId)
+
+    /** 所有 workspace 的任务（全局 jobs 页 / 侧边栏用）。 */
+    fun recentJobsFlow(limit: Int = 200) = dao.listRecentJobsFlow(limit)
+
+    fun runningJobsFlow() = dao.listRunningJobsFlow()
 
     suspend fun listDefs(workspaceId: String) = dao.listDefs(workspaceId)
 

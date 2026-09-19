@@ -32,6 +32,7 @@ import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
+import me.rerere.rikkahub.data.job.WorkspaceJobManager
 import me.rerere.rikkahub.utils.NotificationUtil
 import org.koin.android.ext.android.inject
 import kotlin.uuid.Uuid
@@ -104,12 +105,17 @@ class BackgroundKeepAliveService : Service() {
 
     private val settingsStore: SettingsStore by inject()
     private val eventBus: AppEventBus by inject()
+    private val jobManager: WorkspaceJobManager by inject()
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var settingsObserverJob: Job? = null
     private var generationObserverJob: Job? = null
+    private var jobObserverJob: Job? = null
     private var notificationTickerJob: Job? = null
+
+    /** 后台任务运行数（用于在常驻通知里显示）。 */
+    private var runningJobs = 0
 
     /** 正在生成回复的会话（用于在常驻通知上显示"正在生成"）。 */
     private val activeGenerations = linkedSetOf<Uuid>()
@@ -173,6 +179,7 @@ class BackgroundKeepAliveService : Service() {
             _running.value = true
             observeSettings()
             observeGenerations()
+            observeJobs()
             startNotificationTicker()
             true
         } catch (e: Exception) {
@@ -214,6 +221,17 @@ class BackgroundKeepAliveService : Service() {
         }
     }
 
+    /** 常驻通知同时反映后台任务运行情况。 */
+    private fun observeJobs() {
+        if (jobObserverJob != null) return
+        jobObserverJob = serviceScope.launch {
+            jobManager.runningCount.collect { count ->
+                runningJobs = count
+                refreshNotification()
+            }
+        }
+    }
+
     private fun startNotificationTicker() {
         if (notificationTickerJob != null) return
         notificationTickerJob = serviceScope.launch {
@@ -236,11 +254,16 @@ class BackgroundKeepAliveService : Service() {
 
     private fun buildNotification(): Notification {
         val generating = synchronized(activeGenerations) { activeGenerations.size }
-        val content = if (generating > 0) {
-            getString(R.string.notification_background_keep_alive_generating, generating)
-        } else {
-            getString(R.string.notification_background_keep_alive_text)
+        val parts = buildList {
+            if (runningJobs > 0) {
+                add(getString(R.string.notification_background_keep_alive_jobs, runningJobs))
+            }
+            if (generating > 0) {
+                add(getString(R.string.notification_background_keep_alive_generating, generating))
+            }
         }
+        val content = parts.joinToString(" · ")
+            .ifEmpty { getString(R.string.notification_background_keep_alive_text) }
         return NotificationCompat.Builder(this, BACKGROUND_KEEP_ALIVE_NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_rikkahub)
             .setContentTitle(getString(R.string.notification_background_keep_alive_title))
@@ -305,6 +328,8 @@ class BackgroundKeepAliveService : Service() {
         settingsObserverJob = null
         generationObserverJob?.cancel()
         generationObserverJob = null
+        jobObserverJob?.cancel()
+        jobObserverJob = null
         notificationTickerJob?.cancel()
         notificationTickerJob = null
         synchronized(activeGenerations) { activeGenerations.clear() }

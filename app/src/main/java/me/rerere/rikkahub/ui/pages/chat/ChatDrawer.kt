@@ -56,6 +56,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChartColumn
+import me.rerere.hugeicons.stroke.Cpu
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.FolderAdd
@@ -73,6 +74,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.job.WorkspaceJobManager
 import me.rerere.rikkahub.data.model.Folder
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.ui.components.ai.AssistantPicker
@@ -134,6 +136,10 @@ fun ChatDrawerContent(
     val conversationJobs by vm.conversationJobs.collectAsStateWithLifecycle(
         initialValue = emptyMap(),
     )
+
+    // 后台任务运行数（侧边栏入口显示）
+    val jobManager: WorkspaceJobManager = koinInject()
+    val runningJobs by jobManager.runningCount.collectAsStateWithLifecycle()
 
     // 昵称编辑状态
     val nicknameEditState = useEditState<String> { newNickname ->
@@ -389,6 +395,24 @@ fun ChatDrawerContent(
                     },
                     onClick = {
                         navController.navigate(Screen.Favorite)
+                    },
+                )
+
+                DrawerAction(
+                    icon = {
+                        Icon(HugeIcons.Cpu, stringResource(R.string.jobs_page_title))
+                    },
+                    label = {
+                        Text(
+                            if (runningJobs > 0) {
+                                stringResource(R.string.jobs_page_title) + " (" + runningJobs + ")"
+                            } else {
+                                stringResource(R.string.jobs_page_title)
+                            }
+                        )
+                    },
+                    onClick = {
+                        navController.navigate(Screen.Jobs())
                     },
                 )
 

@@ -5,12 +5,14 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.WORKSPACE_JOB_NOTIFICATION_CHANNEL_ID
+import me.rerere.rikkahub.data.db.dao.WorkspaceJobDAO
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.job.WorkspaceJobStatus
@@ -18,19 +20,36 @@ import me.rerere.rikkahub.utils.sendNotification
 
 private const val TAG = "JobNotification"
 
-/** 后台任务的系统通知（完成/失败/超时/被系统延后）。 */
+/** "运行中"汇总通知的固定 id（单个任务完成通知用 3000+ 段） */
+private const val RUNNING_NOTIFICATION_ID = 3100
+
+/**
+ * 后台任务的系统通知:
+ * - 每个任务结束/被延后: 单独一条通知（点击回到应用的任务页）
+ * - 有任务在运行时: 一条汇总的 ongoing 通知"当前 N 个任务运行中", 全部结束后自动消失
+ */
 class WorkspaceJobNotificationManager(
     private val context: Application,
-    appScope: AppScope,
+    private val appScope: AppScope,
     eventBus: AppEventBus,
+    private val dao: WorkspaceJobDAO,
 ) {
     init {
         appScope.launch(Dispatchers.Default) {
             eventBus.events.collect { event ->
                 runCatching {
                     when (event) {
-                        is AppEvent.WorkspaceJobFinished -> notifyFinished(event)
-                        is AppEvent.WorkspaceJobDeferred -> notifyDeferred(event)
+                        is AppEvent.WorkspaceJobStarted -> refreshRunningNotification()
+                        is AppEvent.WorkspaceJobFinished -> {
+                            notifyFinished(event)
+                            refreshRunningNotification()
+                        }
+
+                        is AppEvent.WorkspaceJobDeferred -> {
+                            notifyDeferred(event)
+                            refreshRunningNotification()
+                        }
+
                         else -> Unit
                     }
                 }.onFailure { Log.e(TAG, "notify job event failed", it) }
@@ -66,7 +85,7 @@ class WorkspaceJobNotificationManager(
             this.content = content
             autoCancel = true
             this.category = category
-            contentIntent = pendingIntent(event.jobId, event.workspaceId)
+            contentIntent = openJobsIntent(notificationId(event.jobId))
             useBigTextStyle = true
         }
     }
@@ -80,7 +99,31 @@ class WorkspaceJobNotificationManager(
             content = context.getString(R.string.job_notification_deferred)
             autoCancel = true
             category = NotificationCompat.CATEGORY_REMINDER
-            contentIntent = pendingIntent(event.jobId, event.workspaceId)
+            contentIntent = openJobsIntent(notificationId(event.jobId))
+            useBigTextStyle = true
+        }
+    }
+
+    /** 运行中任务的汇总通知（ongoing, 无声音）。 */
+    private suspend fun refreshRunningNotification() {
+        val running = runCatching { dao.listRunningJobs() }.getOrDefault(emptyList())
+        if (running.isEmpty()) {
+            runCatching {
+                NotificationManagerCompat.from(context).cancel(RUNNING_NOTIFICATION_ID)
+            }
+            return
+        }
+        val names = running.joinToString(", ") { it.name }.take(160)
+        context.sendNotification(
+            channelId = WORKSPACE_JOB_NOTIFICATION_CHANNEL_ID,
+            notificationId = RUNNING_NOTIFICATION_ID,
+        ) {
+            title = context.getString(R.string.job_notification_running_title, running.size)
+            content = names
+            ongoing = true
+            onlyAlertOnce = true
+            category = NotificationCompat.CATEGORY_PROGRESS
+            contentIntent = openJobsIntent(RUNNING_NOTIFICATION_ID)
             useBigTextStyle = true
         }
     }
@@ -96,15 +139,15 @@ class WorkspaceJobNotificationManager(
 
     private fun notificationId(jobId: String): Int = 3000 + (jobId.hashCode() and 0x0FFF)
 
-    private fun pendingIntent(jobId: String, workspaceId: String): PendingIntent {
+    /** 点击通知打开全局任务页。 */
+    private fun openJobsIntent(requestCode: Int): PendingIntent {
         val intent = Intent(context, RouteActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("workspaceId", workspaceId)
-            putExtra("jobId", jobId)
+            putExtra("openJobs", true)
         }
         return PendingIntent.getActivity(
             context,
-            notificationId(jobId),
+            requestCode,
             intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )

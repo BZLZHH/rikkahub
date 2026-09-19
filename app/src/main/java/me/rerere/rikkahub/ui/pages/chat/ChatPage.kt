@@ -11,6 +11,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +59,7 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Cpu
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
@@ -77,6 +80,8 @@ import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.SearchMode
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.rememberChatAttachmentPickerActions
+import me.rerere.rikkahub.data.job.WorkspaceJobManager
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
@@ -685,6 +690,25 @@ private fun TopBar(
             }
         },
         actions = {
+            // 会话内也能查看后台任务（默认过滤到本会话发起的任务）
+            val jobManager: WorkspaceJobManager = koinInject()
+            val runningJobs by jobManager.runningCount.collectAsStateWithLifecycle()
+            val jobsNav = LocalNavController.current
+            IconButton(
+                onClick = {
+                    jobsNav.navigate(Screen.Jobs(conversation.id.toString()))
+                }
+            ) {
+                BadgedBox(
+                    badge = {
+                        if (runningJobs > 0) {
+                            Badge { Text(runningJobs.toString()) }
+                        }
+                    }
+                ) {
+                    Icon(HugeIcons.Cpu, stringResource(R.string.jobs_page_title))
+                }
+            }
             IconButton(
                 onClick = {
                     onClickMenu()

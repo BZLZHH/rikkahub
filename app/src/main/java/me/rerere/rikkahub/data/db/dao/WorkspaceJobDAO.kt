@@ -28,6 +28,12 @@ interface WorkspaceJobDAO {
     @Query("SELECT * FROM workspace_jobs WHERE status = 'RUNNING'")
     suspend fun listRunningJobs(): List<WorkspaceJobEntity>
 
+    @Query("SELECT * FROM workspace_jobs ORDER BY created_at DESC LIMIT :limit")
+    fun listRecentJobsFlow(limit: Int): Flow<List<WorkspaceJobEntity>>
+
+    @Query("SELECT * FROM workspace_jobs WHERE status = 'RUNNING' ORDER BY created_at DESC")
+    fun listRunningJobsFlow(): Flow<List<WorkspaceJobEntity>>
+
     @Query("SELECT COUNT(*) FROM workspace_jobs WHERE status = 'RUNNING'")
     suspend fun countRunningJobs(): Int
 
