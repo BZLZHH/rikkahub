@@ -359,6 +359,83 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                     )
                 }
             }
+
+            // 工具调用自动审批: 需要人工确认的工具调用先交给指定模型判断
+            item {
+                val allModels = remember(settings.providers) {
+                    settings.providers.filter { it.enabled }.flatMap { provider ->
+                        provider.models.map { model -> provider to model }
+                    }
+                }
+                val selectedModel = remember(settings.autoApprovalModelId, allModels) {
+                    allModels.firstOrNull { it.second.id == settings.autoApprovalModelId }
+                }
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_auto_approval_title)) },
+                ) {
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_auto_approval_enable_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_auto_approval_enable_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.autoApprovalEnabled,
+                                onCheckedChange = { enabled ->
+                                    vm.updateSettings(settings.copy(autoApprovalEnabled = enabled))
+                                },
+                            )
+                        },
+                    )
+                    if (settings.autoApprovalEnabled) {
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_auto_approval_model_title)) },
+                            supportingContent = {
+                                Text(
+                                    if (selectedModel != null) {
+                                        selectedModel.first.name + " / " + selectedModel.second.displayName
+                                    } else {
+                                        stringResource(R.string.setting_auto_approval_model_fallback)
+                                    }
+                                )
+                            },
+                            trailingContent = {
+                                Select(
+                                    options = listOf<Pair<me.rerere.ai.provider.ProviderSetting, me.rerere.ai.provider.Model>?>(null) + allModels,
+                                    selectedOption = selectedModel,
+                                    onOptionSelected = { option ->
+                                        vm.updateSettings(settings.copy(autoApprovalModelId = option?.second?.id))
+                                    },
+                                    optionToString = { option ->
+                                        option?.let { it.first.name + " / " + it.second.displayName }
+                                            ?: stringResource(R.string.setting_auto_approval_model_fallback)
+                                    },
+                                )
+                            },
+                        )
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_auto_approval_scope_title)) },
+                            supportingContent = { Text(stringResource(R.string.setting_auto_approval_scope_desc)) },
+                            trailingContent = {
+                                Switch(
+                                    checked = settings.autoApprovalActionToolsOnly,
+                                    onCheckedChange = { only ->
+                                        vm.updateSettings(settings.copy(autoApprovalActionToolsOnly = only))
+                                    },
+                                )
+                            },
+                        )
+                        item(
+                            headlineContent = {
+                                Text(
+                                    text = stringResource(R.string.setting_auto_approval_note),
+                                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                        )
+                    }
+                }
+            }
         }
     }
 }

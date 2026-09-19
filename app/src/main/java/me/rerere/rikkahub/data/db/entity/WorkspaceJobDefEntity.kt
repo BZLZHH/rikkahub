@@ -25,6 +25,9 @@ data class WorkspaceJobDefEntity(
     val name: String,
     @ColumnInfo("command")
     val command: String,
+    /** 这个任务是干什么的（AI 或用户填写, 展示用） */
+    @ColumnInfo("description")
+    val description: String? = null,
     @ColumnInfo("cwd")
     val cwd: String = "",
     @ColumnInfo("mode")

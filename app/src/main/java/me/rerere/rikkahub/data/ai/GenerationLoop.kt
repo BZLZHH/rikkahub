@@ -70,6 +70,8 @@ class GenerationLoop(
     private val context: Context,
     private val providerManager: ProviderManager,
     private val json: Json,
+    /** 工具调用自动审批（用户在设置里开启后生效） */
+    private val autoApprovalJudge: AutoApprovalJudge,
 ) {
     fun generateText(
         settings: Settings,
@@ -171,14 +173,31 @@ class GenerationLoop(
 
                 // Check for tools that need approval
                 var hasPendingApproval = false
+                val userIntent = messages.lastOrNull { it.role == MessageRole.USER }
+                    ?.summaryAsText(maxLength = 1_500)
+                    .orEmpty()
                 val updatedTools = toolCalls.map { tool ->
                     val toolDef = tools.find { it.name == tool.toolName }
                     when {
-                        // Tool needs approval and state is Auto -> set to Pending
+                        // Tool needs approval and state is Auto -> 交给审批模型判断, 通过则直接执行
                         toolDef?.needsApproval(tool.inputAsJson()) == true &&
                             tool.approvalState is ToolApprovalState.Auto -> {
-                            hasPendingApproval = true
-                            tool.copy(approvalState = ToolApprovalState.Pending)
+                            val decision = autoApprovalJudge.judge(
+                                settings = settings,
+                                toolName = tool.toolName,
+                                arguments = tool.inputAsJson(),
+                                userIntent = userIntent,
+                            )
+                            if (decision.approved) {
+                                Log.i(TAG, "tool ${tool.toolName} auto-approved: ${decision.reason}")
+                                tool.copy(approvalState = ToolApprovalState.Approved)
+                            } else {
+                                if (decision.judged) {
+                                    Log.i(TAG, "tool ${tool.toolName} not auto-approved: ${decision.reason}")
+                                }
+                                hasPendingApproval = true
+                                tool.copy(approvalState = ToolApprovalState.Pending)
+                            }
                         }
                         // State is Pending -> keep waiting
                         tool.approvalState is ToolApprovalState.Pending -> {

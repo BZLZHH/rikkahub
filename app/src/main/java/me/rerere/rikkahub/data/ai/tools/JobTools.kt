@@ -100,6 +100,10 @@ private fun jobStartTool(ctx: JobToolContext, needsApproval: (String) -> Boolean
                     put("description", "Arguments for the definition's params")
                 })
                 put("name", buildJsonObject { put("type", "string") })
+                put("reason", buildJsonObject {
+                    put("type", "string")
+                    put("description", "REQUIRED: one short sentence (in the user's language) telling the user WHY this job is being started. Shown in the UI instead of raw JSON.")
+                })
                 put("cwd", buildJsonObject {
                     put("type", "string")
                     put("description", "Working directory relative to the workspace files root")
@@ -135,6 +139,7 @@ private fun jobStartTool(ctx: JobToolContext, needsApproval: (String) -> Boolean
         val defRef = params.str("def_id")
         val args = params.stringMap("args")
         val name = params.str("name")
+        val reason = params.str("reason")
         val cwd = params.str("cwd").orEmpty()
         val mode = WorkspaceJobMode.from(params.str("mode"))
         val maxRuntime = (params.str("max_runtime_seconds")?.toLongOrNull() ?: 21_600L) * 1_000L
@@ -164,6 +169,7 @@ private fun jobStartTool(ctx: JobToolContext, needsApproval: (String) -> Boolean
                     workspaceId = ctx.workspaceId,
                     command = command,
                     name = name,
+                    reason = reason,
                     cwd = cwd,
                     mode = mode,
                     maxRuntimeMs = maxRuntime.coerceAtMost(WorkspaceJobManager.HARD_MAX_RUNTIME_MS),
@@ -431,7 +437,14 @@ private fun jobDefCreateTool(ctx: JobToolContext, needsApproval: (String) -> Boo
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("name", buildJsonObject { put("type", "string") })
+                put("name", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Short stable identifier for this task (shown to the user)")
+                })
+                put("description", buildJsonObject {
+                    put("type", "string")
+                    put("description", "REQUIRED: one sentence in the user's language describing what this job does and when it runs")
+                })
                 put("command", buildJsonObject { put("type", "string") })
                 put("cwd", buildJsonObject { put("type", "string") })
                 put("mode", buildJsonObject { put("type", "string") })
@@ -471,6 +484,7 @@ private fun jobDefCreateTool(ctx: JobToolContext, needsApproval: (String) -> Boo
                 id = Uuid.random().toString(),
                 workspaceId = ctx.workspaceId,
                 name = name,
+                description = params.str("description")?.takeIf { it.isNotBlank() },
                 command = command,
                 cwd = params.str("cwd").orEmpty(),
                 mode = WorkspaceJobMode.from(params.str("mode")).name,
@@ -501,6 +515,7 @@ private fun jobDefUpdateTool(ctx: JobToolContext, needsApproval: (String) -> Boo
             properties = buildJsonObject {
                 put("def_id", buildJsonObject { put("type", "string") })
                 put("name", buildJsonObject { put("type", "string") })
+                put("description", buildJsonObject { put("type", "string") })
                 put("command", buildJsonObject { put("type", "string") })
                 put("cwd", buildJsonObject { put("type", "string") })
                 put("mode", buildJsonObject { put("type", "string") })
@@ -527,6 +542,7 @@ private fun jobDefUpdateTool(ctx: JobToolContext, needsApproval: (String) -> Boo
             trigger?.let { validateTrigger(it)?.let { err -> return@runTool errorJson("invalid_trigger", err) } }
             val updated = existing.copy(
                 name = params.str("name")?.trim()?.takeIf { it.isNotBlank() } ?: existing.name,
+                description = params.str("description") ?: existing.description,
                 command = params.str("command") ?: existing.command,
                 cwd = params.str("cwd") ?: existing.cwd,
                 mode = params.str("mode")?.let { WorkspaceJobMode.from(it).name } ?: existing.mode,
@@ -605,6 +621,10 @@ private fun jobRunTool(ctx: JobToolContext, needsApproval: (String) -> Boolean) 
             properties = buildJsonObject {
                 put("def_id", buildJsonObject { put("type", "string") })
                 put("args", buildJsonObject { put("type", "object") })
+                put("reason", buildJsonObject {
+                    put("type", "string")
+                    put("description", "One short sentence telling the user why you are running it now")
+                })
             },
             required = listOf("def_id"),
         )
@@ -624,7 +644,13 @@ private fun jobRunTool(ctx: JobToolContext, needsApproval: (String) -> Boolean) 
                 assistantId = ctx.assistantId,
                 requireKeepAlive = false,
             )
-            textJson(job.toJson())
+            val reason = params.str("reason")?.takeIf { it.isNotBlank() }
+            if (reason != null) {
+                // 定义里的说明是"这个任务是什么", 本次运行的 reason 是"为什么现在跑", 两者都保留
+                textJson(job.copy(reason = reason).toJson())
+            } else {
+                textJson(job.toJson())
+            }
         }
     },
 )
@@ -756,6 +782,7 @@ private fun chunkJson(chunk: JobLogChunk?): JsonObject = buildJsonObject {
 private fun WorkspaceJobEntity.toJson(): JsonObject = buildJsonObject {
     put("jobId", id)
     put("name", name)
+    reason?.let { put("reason", it) }
     put("status", status)
     put("mode", mode)
     put("command", command)
@@ -778,6 +805,7 @@ private fun WorkspaceJobEntity.toJson(): JsonObject = buildJsonObject {
 private fun WorkspaceJobDefEntity.toJson(): JsonObject = buildJsonObject {
     put("defId", id)
     put("name", name)
+    description?.let { put("description", it) }
     put("command", command)
     if (cwd.isNotBlank()) put("cwd", cwd)
     put("mode", mode)

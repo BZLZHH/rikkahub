@@ -32,6 +32,9 @@ data class WorkspaceJobEntity(
     val conversationId: String? = null,
     @ColumnInfo("name")
     val name: String,
+    /** AI 给出的"为什么要跑这个任务"的自然语言说明（展示用, 便于用户理解） */
+    @ColumnInfo("reason")
+    val reason: String? = null,
     @ColumnInfo("command")
     val command: String,
     @ColumnInfo("cwd")

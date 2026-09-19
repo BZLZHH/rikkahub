@@ -132,6 +132,7 @@ class WorkspaceJobManager(
         workspaceId: String,
         command: String,
         name: String? = null,
+        reason: String? = null,
         cwd: String = "",
         mode: WorkspaceJobMode = WorkspaceJobMode.PIPE,
         maxRuntimeMs: Long = DEFAULT_MAX_RUNTIME_MS,
@@ -151,6 +152,7 @@ class WorkspaceJobManager(
             id = Uuid.random().toString(),
             workspaceId = workspaceId,
             name = name?.takeIf { it.isNotBlank() } ?: deriveName(command),
+            reason = reason?.takeIf { it.isNotBlank() },
             command = command,
             cwd = cwd,
             mode = mode.name,
@@ -190,6 +192,7 @@ class WorkspaceJobManager(
                     workspaceId = def.workspaceId,
                     defId = def.id,
                     name = def.name,
+                    reason = def.description,
                     command = def.command,
                     cwd = def.cwd,
                     argsJson = runCatching { me.rerere.rikkahub.utils.JsonInstant.encodeToString(args) }
@@ -222,6 +225,7 @@ class WorkspaceJobManager(
             workspaceId = def.workspaceId,
             defId = def.id,
             name = def.name,
+            reason = def.description,
             command = resolved.command,
             cwd = def.cwd,
             argsJson = runCatching { me.rerere.rikkahub.utils.JsonInstant.encodeToString(args) }
@@ -515,6 +519,9 @@ class WorkspaceJobManager(
     fun recentJobsFlow(limit: Int = 200) = dao.listRecentJobsFlow(limit)
 
     fun runningJobsFlow() = dao.listRunningJobsFlow()
+
+    /** 所有 workspace 的定时任务定义（全局任务页用）。 */
+    fun recentDefsFlow() = dao.listAllDefsFlow()
 
     suspend fun listDefs(workspaceId: String) = dao.listDefs(workspaceId)
 

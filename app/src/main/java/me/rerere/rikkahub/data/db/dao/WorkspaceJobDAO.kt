@@ -69,6 +69,9 @@ interface WorkspaceJobDAO {
     @Query("SELECT * FROM workspace_job_defs WHERE workspace_id = :workspaceId ORDER BY name ASC")
     fun listDefsFlow(workspaceId: String): Flow<List<WorkspaceJobDefEntity>>
 
+    @Query("SELECT * FROM workspace_job_defs ORDER BY updated_at DESC")
+    fun listAllDefsFlow(): Flow<List<WorkspaceJobDefEntity>>
+
     @Query("SELECT * FROM workspace_job_defs WHERE workspace_id = :workspaceId ORDER BY name ASC")
     suspend fun listDefs(workspaceId: String): List<WorkspaceJobDefEntity>
 

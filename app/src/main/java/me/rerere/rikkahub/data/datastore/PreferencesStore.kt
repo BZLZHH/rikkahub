@@ -140,6 +140,11 @@ class SettingsStore(
         val WEB_SERVER_ACCESS_PASSWORD = stringPreferencesKey("web_server_access_password")
         val WEB_SERVER_LOCALHOST_ONLY = booleanPreferencesKey("web_server_localhost_only")
 
+        // 工具调用自动审批（由指定模型判断是否可以跳过人工确认）
+        val AUTO_APPROVAL_ENABLED = booleanPreferencesKey("auto_approval_enabled")
+        val AUTO_APPROVAL_MODEL = stringPreferencesKey("auto_approval_model")
+        val AUTO_APPROVAL_ACTION_TOOLS_ONLY = booleanPreferencesKey("auto_approval_action_tools_only")
+
         // 后台常驻（常驻通知）
         val BACKGROUND_RUNNING_ENABLED = booleanPreferencesKey("background_running_enabled")
 
@@ -219,6 +224,11 @@ class SettingsStore(
                 preferences[WEB_SERVER_ACCESS_PASSWORD] = settings.webServerAccessPassword
                 preferences[WEB_SERVER_LOCALHOST_ONLY] = settings.webServerLocalhostOnly
                 preferences[BACKGROUND_RUNNING_ENABLED] = settings.backgroundRunningEnabled
+                preferences[AUTO_APPROVAL_ENABLED] = settings.autoApprovalEnabled
+                preferences[AUTO_APPROVAL_ACTION_TOOLS_ONLY] = settings.autoApprovalActionToolsOnly
+                settings.autoApprovalModelId?.let {
+                    preferences[AUTO_APPROVAL_MODEL] = it.toString()
+                } ?: preferences.remove(AUTO_APPROVAL_MODEL)
                 preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
                 preferences[LAUNCH_COUNT] = settings.launchCount
                 preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
@@ -315,6 +325,9 @@ class SettingsStore(
                 webServerAccessPassword = preferences[WEB_SERVER_ACCESS_PASSWORD] ?: "",
                 webServerLocalhostOnly = preferences[WEB_SERVER_LOCALHOST_ONLY] == true,
                 backgroundRunningEnabled = preferences[BACKGROUND_RUNNING_ENABLED] == true,
+                autoApprovalEnabled = preferences[AUTO_APPROVAL_ENABLED] == true,
+                autoApprovalModelId = preferences[AUTO_APPROVAL_MODEL]?.let { Uuid.parse(it) },
+                autoApprovalActionToolsOnly = preferences[AUTO_APPROVAL_ACTION_TOOLS_ONLY] != false,
                 backupReminderConfig = preferences[BACKUP_REMINDER_CONFIG]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: BackupReminderConfig(),
@@ -570,6 +583,12 @@ data class Settings(
     val webServerLocalhostOnly: Boolean = false,
     /** 是否开启「后台持续运行」（常驻通知 + 前台服务保活）。 */
     val backgroundRunningEnabled: Boolean = false,
+    /** 自动审批: 需要审批的工具调用先交给 [autoApprovalModelId] 判断, 通过则跳过人工确认。 */
+    val autoApprovalEnabled: Boolean = false,
+    /** 审批模型; null 表示使用"快速模型" */
+    val autoApprovalModelId: Uuid? = null,
+    /** 仅对高影响工具（job_* / workspace_* / mcp__*）自动审批, 其余仍人工确认 */
+    val autoApprovalActionToolsOnly: Boolean = true,
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
     val launchCount: Int = 0,
     val sponsorAlertDismissedAt: Int = 0,
