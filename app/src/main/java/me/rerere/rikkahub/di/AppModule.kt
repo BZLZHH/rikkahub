@@ -125,7 +125,9 @@ val appModule = module {
     single {
         me.rerere.rikkahub.data.workflow.WorkflowAgentInvoker(
             runner = get(),
-            toolFactory = get(),
+            // 延迟解析: 直接 get() 会形成 ChatToolFactory <-> WorkflowRunner 的环,
+            // Koin 递归解析单例 -> StackOverflowError（真机崩溃过一次）。
+            toolFactory = { get() },
             settingsStore = get(),
         )
     }

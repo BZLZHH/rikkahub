@@ -29,7 +29,17 @@ private const val TAG = "WorkflowAgentInvoker"
  */
 class WorkflowAgentInvoker(
     private val runner: AgentRunner,
-    private val toolFactory: AgentToolFactory,
+    /**
+     * **延迟解析**工具工厂, 不能直接注入实例。
+     *
+     * 直接注入会成环: ChatToolFactory -> WorkflowRunner -> WorkflowAgentInvoker
+     * -> AgentToolFactory -> ChatToolFactory, 而 Koin 解析单例是**递归**的,
+     * 结果就是 StackOverflowError（真机上崩过一次, 别改回去）。
+     *
+     * 这里延迟是天然成立的: 只有在**真的要跑一个 agent** 时才需要它,
+     * 而那一刻整个图早就构造完了。同一个套路见 RunOrchestrator 的 executorFactories。
+     */
+    private val toolFactory: () -> AgentToolFactory,
     private val settingsStore: SettingsStore,
 ) {
 
@@ -57,7 +67,7 @@ class WorkflowAgentInvoker(
         val groups = setOf(AgentToolGroup.WORKSPACE)
         // 工具白名单与子代理共用: workflow_* / subagent_* / ask_user 永远不会发给它们
         // （见 AgentToolPolicy）, 所以脚本里的 agent 不可能递归起 workflow, 也不会卡在人工确认上。
-        val tools = toolFactory.createTools(
+        val tools = toolFactory().createTools(
             settings = settings,
             assistant = parentAssistant,
             model = model,
