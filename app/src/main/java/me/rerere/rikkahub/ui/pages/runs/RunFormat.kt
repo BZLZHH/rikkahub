@@ -11,7 +11,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -44,6 +49,26 @@ fun formatDuration(millis: Long): String {
         minutes > 0 -> minutes.toString() + "m" + seconds.toString().padStart(2, '0') + "s"
         else -> seconds.toString() + "s"
     }
+}
+
+/**
+ * 一个会走的"现在"。
+ *
+ * 运行中的耗时是 `now - startedAt` 算出来的 —— 如果只在组合时算一次, 它就**永远不会动**,
+ * 界面上看就是"卡住了/不更新"。所以这里每秒推一次状态, 让依赖它的文本跟着走。
+ *
+ * 只在真的有东西在跑时才走: 全部结束之后没必要每秒重组一次列表。
+ */
+@Composable
+fun rememberTickingNow(active: Boolean, periodMs: Long = 1000L): Long {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(active) {
+        while (active) {
+            now = System.currentTimeMillis()
+            delay(periodMs)
+        }
+    }
+    return now
 }
 
 /** "3 分钟前" 这种人话; 刚发生的说"刚刚"。 */

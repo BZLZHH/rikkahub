@@ -23,12 +23,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -46,8 +49,11 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.db.dao.WorkflowRunDAO
 import me.rerere.rikkahub.data.db.entity.WorkflowAgentEntity
 import me.rerere.rikkahub.data.run.RunStatus
+import me.rerere.rikkahub.data.workflow.AgentRetryResult
+import me.rerere.rikkahub.data.workflow.WorkflowRunner
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.JsonInstant
 import org.koin.compose.koinInject
@@ -70,8 +76,16 @@ fun WorkflowRunPage(runId: String) {
     val nav = LocalNavController.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
+    val runner: WorkflowRunner = koinInject()
+    val toaster = LocalToaster.current
     val run by dao.getByIdFlow(runId).collectAsStateWithLifecycle(initialValue = null)
     val agents by dao.listAgentsFlow(runId).collectAsStateWithLifecycle(initialValue = emptyList())
+
+    // 运行中要能强停; 停止是挂起的, 所以扔到界面作用域里
+    val scope = rememberCoroutineScope()
+    val running = run?.let { !RunStatus.from(it.status).isFinished } == true
+    // 耗时每秒走一次 —— 否则统计看着像冻住了
+    val now = rememberTickingNow(running)
 
     val declared = remember(run?.phasesJson) { parseStringList(run?.phasesJson) }
     // 左栏的顺序: 脚本声明的在前, 实际出现过的补在后面（脚本可能用了没声明的 phase）
@@ -103,6 +117,13 @@ fun WorkflowRunPage(runId: String) {
                     }
                 },
                 navigationIcon = { BackButton() },
+                actions = {
+                    if (running) {
+                        TextButton(onClick = { scope.launch { runner.kill(runId) } }) {
+                            Text("停止")
+                        }
+                    }
+                },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
             )
@@ -119,7 +140,7 @@ fun WorkflowRunPage(runId: String) {
                     phase = r.phase,
                     agentsCalled = r.agentsCalled,
                     agentsReused = r.agentsReused,
-                    runtimeMs = r.runtimeMs ?: r.startedAt?.let { System.currentTimeMillis() - it },
+                    runtimeMs = r.runtimeMs ?: r.startedAt?.let { now - it },
                     tokens = agents.sumOf { it.tokensIn + it.tokensOut },
                     agents = agents,
                     error = r.error,
@@ -141,6 +162,10 @@ fun WorkflowRunPage(runId: String) {
                 AgentList(
                     agents = visibleAgents,
                     modifier = Modifier.weight(1f),
+                    onRetry = { agent ->
+                        val result = runner.retryAgent(runId, agent.callIndex)
+                        if (result is AgentRetryResult.Rejected) toaster.show(result.reason)
+                    },
                     onOpen = { agent ->
                         agent.sessionId?.let { sessionId ->
                             nav.navigate(
@@ -418,6 +443,7 @@ private fun RailItem(
 private fun AgentList(
     agents: List<WorkflowAgentEntity>,
     modifier: Modifier = Modifier,
+    onRetry: (WorkflowAgentEntity) -> Unit,
     onOpen: (WorkflowAgentEntity) -> Unit,
 ) {
     if (agents.isEmpty()) {
@@ -435,15 +461,22 @@ private fun AgentList(
         contentPadding = PaddingValues(vertical = 6.dp),
     ) {
         items(agents, key = { it.callIndex }) { agent ->
-            AgentRow(agent) { onOpen(agent) }
+            AgentRow(agent, onRetry = { onRetry(agent) }, onClick = { onOpen(agent) })
         }
     }
 }
 
 @Composable
-private fun AgentRow(agent: WorkflowAgentEntity, onClick: () -> Unit) {
+private fun AgentRow(
+    agent: WorkflowAgentEntity,
+    onRetry: () -> Unit,
+    onClick: () -> Unit,
+) {
     val accent = statusColor(agent.status, agent.reused)
     val openable = agent.sessionId != null
+    // 只对"跑完了但没成功"的行给重试: 成功的不需要, 还在跑的给了会与脚本打架
+    val status = RunStatus.from(agent.status)
+    val retryable = status.isFinished && status != RunStatus.SUCCEEDED
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -485,6 +518,11 @@ private fun AgentRow(agent: WorkflowAgentEntity, onClick: () -> Unit) {
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        if (retryable) {
+            TextButton(onClick = onRetry, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                Text("重试", style = MaterialTheme.typography.labelSmall)
+            }
         }
     }
 }

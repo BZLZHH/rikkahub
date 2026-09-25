@@ -21,6 +21,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.dao.WorkflowRunDAO
 import me.rerere.rikkahub.data.db.entity.WorkflowAgentEntity
 import me.rerere.rikkahub.data.db.entity.WorkflowAgentResultEntity
+import me.rerere.rikkahub.data.agent.AgentRunExecutor
 import me.rerere.rikkahub.data.datastore.ModelResolution
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.resolveModelSpec
@@ -70,6 +71,14 @@ data class WorkflowRunRequest(
     val reasoningSpec: String? = null,
 )
 
+/** 单条 agent 重试的受理结果。 */
+sealed interface AgentRetryResult {
+    /** 已经起在后台跑了; 状态会自己从库里更新到界面。 */
+    data object Started : AgentRetryResult
+
+    data class Rejected(val reason: String) : AgentRetryResult
+}
+
 sealed interface WorkflowStartResult {
     data class Started(
         val runId: String,
@@ -98,6 +107,9 @@ class WorkflowRunner(
     private val settingsStore: SettingsStore,
 ) {
     private val jobs = ConcurrentHashMap<String, Job>()
+
+    /** 正在重试中的 "runId#callIndex"; 防止同一个 agent 被连点多次。 */
+    private val retrying = ConcurrentHashMap<String, Unit>()
     private val completions = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
 
     fun isRunning(runId: String): Boolean = jobs[runId]?.isActive == true
@@ -298,6 +310,7 @@ class WorkflowRunner(
                         callIndex = call.callIndex,
                         label = call.label,
                         prompt = call.prompt,
+                        schemaJson = call.schemaJson,
                         phase = call.phase,
                         reasoning = call.reasoning,
                         // 复用命中的行一出生就是完成态: 它确实"完成"了, 只是没花时间
@@ -348,6 +361,7 @@ class WorkflowRunner(
                         callIndex = call.callIndex,
                         label = call.label,
                         prompt = call.prompt,
+                        schemaJson = call.schemaJson,
                         phase = call.phase,
                         reasoning = call.reasoning,
                         status = status,
@@ -448,6 +462,92 @@ class WorkflowRunner(
             return true
         }
         return false
+    }
+
+    /**
+     * 重试一条**已经结束**的 agent。
+     *
+     * 参数全部来自那一行自己（提示词 / schema / label / phase / 档位 / 模型）——
+     * 所以这是"照着原样再跑一次", 而不是"用现在的设置在别的上下文里重跑"。
+     * 少了任何一项, 重试的结果都与原来那次不可比。
+     *
+     * **成功的结果会写进可恢复存档**（指纹 + 调用序号）: 于是"下次跑同一个脚本"会直接复用它。
+     * 这才让重试不只是"看一眼", 而是真的把那次失败补上了 —— 这是它最有用的一面。
+     *
+     * 立刻返回, 在后台跑: 一次重试可能几分钟, 界面不该卡在那里等。
+     */
+    fun retryAgent(runId: String, callIndex: Int): AgentRetryResult {
+        // 整趟还在跑的时候不许重试单条: 那些行归脚本管, 两边同时写会打架
+        if (isRunning(runId)) {
+            return AgentRetryResult.Rejected("整趟运行还在进行, 请先停止它再重试单条 agent")
+        }
+        val key = runId + "#" + callIndex
+        if (retrying.putIfAbsent(key, Unit) != null) {
+            return AgentRetryResult.Rejected("这一条正在重试中")
+        }
+        scope.launch {
+            try {
+                doRetryAgent(runId, callIndex)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.e(TAG, "retry failed for " + key, e)
+                runCatching {
+                    dao.getAgent(runId, callIndex)?.let { row ->
+                        dao.upsertAgent(row.copy(status = RunStatus.FAILED.name, error = describe(e)))
+                    }
+                }
+            } finally {
+                retrying.remove(key)
+            }
+        }
+        return AgentRetryResult.Started
+    }
+
+    /** 这一条是不是正在重试（UI 用它把按钮置灰）。 */
+    fun isRetrying(runId: String, callIndex: Int): Boolean =
+        retrying.containsKey(runId + "#" + callIndex)
+
+    private suspend fun doRetryAgent(runId: String, callIndex: Int) {
+        val run = dao.getById(runId) ?: return
+        val agent = dao.getAgent(runId, callIndex) ?: return
+        val call = WorkflowAgentCall(
+            callIndex = callIndex,
+            prompt = agent.prompt,
+            schemaJson = agent.schemaJson,
+            label = agent.label,
+            phase = agent.phase,
+            reasoning = agent.reasoning,
+        )
+        val tracker = DaoAgentTracker(runId)
+        val observer = tracker.start(call, reused = false)
+        // 模型用这一行当初记下的 id; 解析不出来就交给 invoker 的默认（快速模型）
+        val modelId = agent.modelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+        val text = invoker.run(
+            call = call,
+            observer = observer,
+            modelId = modelId,
+            conversationId = run.conversationId,
+            assistantId = run.assistantId,
+            cwd = null,
+            maxSteps = AgentRunExecutor.DEFAULT_MAX_STEPS,
+        )
+        val success = text != null
+        tracker.finish(
+            call = call,
+            reused = false,
+            status = if (success) RunStatus.SUCCEEDED.name else RunStatus.FAILED.name,
+            resultText = text,
+            error = if (success) null else "重试后仍然没有产出",
+        )
+        if (text != null) {
+            runCatching {
+                DaoWorkflowJournal(dao).remember(
+                    run.fingerprint,
+                    WorkflowAgentRecord(callIndex, agent.prompt, agent.schemaJson, agent.label, text),
+                )
+            }.onFailure { Log.w(TAG, "retry result not archived for " + runId + "#" + callIndex, it) }
+        }
     }
 
     /** App 启动时: 协程随进程一起没了, 把残留的"未结束"收敛成中断。 */

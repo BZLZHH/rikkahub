@@ -25,6 +25,13 @@ data class WorkflowAgentEntity(
     /** 脚本给的 label（没有就用 null, UI 退回显示 "agent #N"） */
     val label: String? = null,
     val prompt: String,
+    /**
+     * 这一条当时的结构化输出要求。
+     *
+     * 必须存下来: "重试失败的 agent"要**照着原样**再跑一次 —— 少了 schema,
+     * 重试就变成"以散文要 JSON"的另一次调用, 结果与原来那次根本不可比。
+     */
+    val schemaJson: String? = null,
     /** 起这次调用时脚本所处的 phase（左栏按它分组） */
     val phase: String? = null,
     val status: String,
