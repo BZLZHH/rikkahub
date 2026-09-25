@@ -21,7 +21,9 @@ import me.rerere.rikkahub.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-private const val API_URL = "https://updates.rikka-ai.com/"
+// 本 fork 的更新来源: 自己的 GitHub Release（不再查上游的更新服务, 那包装不上）
+private const val API_URL = "https://api.github.com/repos/BZLZHH/rikkahub/releases/latest"
+private const val RELEASES_PAGE = "https://github.com/BZLZHH/rikkahub/releases"
 
 class UpdateChecker(
     private val client: OkHttpClient,
@@ -44,16 +46,18 @@ class UpdateChecker(
                         Request.Builder()
                             .url(API_URL)
                             .get()
+                            .addHeader("Accept", "application/vnd.github+json")
                             .addHeader(
                                 "User-Agent",
-                                "RikkaHub ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
+                                "RikkaHub-Enhanced ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
                             )
                             .build()
                     ).await()
                     if (response.isSuccessful) {
-                        json.decodeFromString<UpdateInfo>(response.body.string())
+                        val release = json.decodeFromString<GitHubRelease>(response.body.string())
+                        release.toUpdateInfo()
                     } else {
-                        throw Exception("Failed to fetch update info")
+                        throw Exception("Failed to fetch update info (${response.code})")
                     }
                 } catch (e: Exception) {
                     throw Exception("Failed to fetch update info", e)
@@ -88,6 +92,48 @@ class UpdateChecker(
             context.openUrl(download.url) // 跳转到下载页面
         }
     }
+}
+
+@Serializable
+private data class GitHubRelease(
+    @kotlinx.serialization.SerialName("tag_name")
+    val tagName: String = "",
+    val name: String? = null,
+    val body: String? = null,
+    @kotlinx.serialization.SerialName("published_at")
+    val publishedAt: String? = null,
+    val assets: List<GitHubAsset> = emptyList(),
+    val draft: Boolean = false,
+    val prerelease: Boolean = false,
+) {
+    fun toUpdateInfo(): UpdateInfo = UpdateInfo(
+        version = tagName.removePrefix("v").removePrefix("V").ifBlank { tagName },
+        publishedAt = publishedAt.orEmpty(),
+        changelog = body?.takeIf { it.isNotBlank() } ?: name.orEmpty(),
+        downloads = assets
+            .filter { it.name.endsWith(".apk", ignoreCase = true) }
+            .map { asset ->
+                UpdateDownload(
+                    name = asset.name,
+                    url = asset.downloadUrl,
+                    size = formatBytes(asset.size),
+                )
+            },
+    )
+}
+
+@Serializable
+private data class GitHubAsset(
+    val name: String = "",
+    @kotlinx.serialization.SerialName("browser_download_url")
+    val downloadUrl: String = "",
+    val size: Long = 0L,
+)
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes <= 0L -> ""
+    bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+    else -> String.format("%.1f MB", bytes / 1024.0 / 1024.0)
 }
 
 @Serializable

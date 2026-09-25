@@ -132,7 +132,7 @@ fun SettingAboutPage() {
                         )
 
                         Text(
-                            text = "RikkaHub",
+                            text = stringResource(R.string.app_name),
                             style = MaterialTheme.typography.displaySmall,
                         )
                     }
@@ -167,23 +167,24 @@ fun SettingAboutPage() {
                     CardGroup(
                         modifier = Modifier.padding(horizontal = 8.dp),
                     ) {
+                        // 本分支（RikkaHub Enhanced）在前, 上游项目单独一行说明来源
                         item(
-                            onClick = { context.openUrl("https://rikka-ai.com/") },
-                            leadingContent = { Icon(HugeIcons.Earth, null) },
-                            supportingContent = { Text("https://rikka-ai.com") },
-                            headlineContent = { Text(stringResource(R.string.about_page_website)) },
-                        )
-                        item(
-                            onClick = { context.openUrl("https://github.com/rikkahub/rikkahub") },
+                            onClick = { context.openUrl(FORK_REPO_URL) },
                             leadingContent = { Icon(HugeIcons.Github, null) },
-                            supportingContent = { Text("https://github.com/rikkahub/rikkahub") },
+                            supportingContent = { Text(FORK_REPO_URL) },
                             headlineContent = { Text(stringResource(R.string.about_page_github)) },
                         )
                         item(
-                            onClick = { context.openUrl("https://github.com/rikkahub/rikkahub/blob/master/LICENSE") },
+                            onClick = { context.openUrl("$FORK_REPO_URL/blob/enhanced/LICENSE") },
                             leadingContent = { Icon(HugeIcons.File02, null) },
-                            supportingContent = { Text("https://github.com/rikkahub/rikkahub/blob/master/LICENSE") },
+                            supportingContent = { Text("$FORK_REPO_URL/blob/enhanced/LICENSE") },
                             headlineContent = { Text(stringResource(R.string.about_page_license)) },
+                        )
+                        item(
+                            onClick = { context.openUrl(UPSTREAM_REPO_URL) },
+                            leadingContent = { Icon(HugeIcons.Github, null) },
+                            supportingContent = { Text("$UPSTREAM_REPO_URL · https://rikka-ai.com") },
+                            headlineContent = { Text(stringResource(R.string.about_page_upstream)) },
                         )
                     }
                 }
@@ -191,3 +192,9 @@ fun SettingAboutPage() {
         }
     }
 }
+
+/** 本分支仓库（RikkaHub Enhanced） */
+private const val FORK_REPO_URL = "https://github.com/BZLZHH/rikkahub"
+
+/** 上游项目（RikkaHub 原仓库） */
+private const val UPSTREAM_REPO_URL = "https://github.com/rikkahub/rikkahub"

@@ -23,11 +23,12 @@ android {
     }
 
     defaultConfig {
-        applicationId = "me.rerere.rikkahub"
+        // 本 fork 的独立身份: 与上游正式版共存, 不会互相覆盖（Kotlin 包名/namespace 保持不变, 只改应用 ID）
+        applicationId = "me.rerere.rikkahub.enhanced"
         minSdk = 26
         targetSdk = 37
         versionCode = 187
-        versionName = "2.5.2"
+        versionName = "2.5.2-rhe1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
