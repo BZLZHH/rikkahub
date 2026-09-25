@@ -51,6 +51,8 @@ class WorkflowAgentInvoker(
     suspend fun run(
         call: WorkflowAgentCall,
         observer: WorkflowAgentObserver,
+        /** 这次 workflow 选定的模型; null 表示退回"快速模型" */
+        modelId: Uuid?,
         conversationId: String?,
         assistantId: String?,
         cwd: String?,
@@ -62,9 +64,10 @@ class WorkflowAgentInvoker(
         val parentAssistant = settings.assistants.firstOrNull { it.id.toString() == assistantId }
             ?: settings.assistants.firstOrNull()
             ?: return null
-        // 与子代理同一策略: 默认用"快速模型" —— workflow 的 agent 是内部劳动力,
-        // 几十上百个调用都吃主模型会把额度烧穿。
-        val model = settings.findModelById(null, settings.fastModelId) ?: return null
+        // 模型由**这一次运行**决定（见 WorkflowRunRequest.modelSpec）:
+        // 默认就是主会话当前那个 —— 用户说"用 workflow 做 X"时, 想的是"用我正在聊的模型"。
+        // 只有调用方没给（老调用点/异常情况）才退回快速模型。
+        val model = settings.findModelById(modelId, settings.fastModelId) ?: return null
 
         val groups = setOf(AgentToolGroup.WORKSPACE)
         // 工具白名单与子代理共用: workflow_* / subagent_* / ask_user 永远不会发给它们

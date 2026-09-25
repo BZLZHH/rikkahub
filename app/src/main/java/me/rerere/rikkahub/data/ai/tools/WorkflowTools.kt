@@ -35,6 +35,13 @@ val WorkflowToolDefaultApprovals: Map<String, Boolean> = mapOf(
 
 data class WorkflowToolContext(
     val workspaceId: String,
+    /**
+     * 主会话当前使用的模型 id。
+     *
+     * workflow 不指定模型时就用它 —— 用户说"用 workflow 做 X"时, 期望的是"用我正在聊的模型",
+     * 而不是某个藏在设置里的"快速模型"。
+     */
+    val defaultModelId: String? = null,
     val conversationId: String?,
     val assistantId: String?,
     val dao: WorkflowRunDAO,
@@ -80,6 +87,8 @@ private fun runTool(ctx: WorkflowToolContext, needsApproval: (String) -> Boolean
             properties = buildJsonObject {
                 put("script", schemaString("The workflow script (JavaScript with top-level await). Required unless name is given."))
                 put("name", schemaString("Name of a saved workflow to run instead of an inline script"))
+                put("title", schemaString("ALWAYS SET THIS: a short title in the user language naming what this run does. It is what the user sees in the run list; without it inline scripts all show up as \"(inline workflow)\"."))
+                put("model", schemaString("Model for the subagents, as \"provider/model\" (e.g. \"DeepSeek/deepseek-chat\") or a model name. Omit to use the model of the current conversation, which is usually what the user wants."))
                 put("save_as", schemaString("Save this inline script under this name for reuse"))
                 put("args", buildJsonObject {
                     put("type", "object")
@@ -119,6 +128,11 @@ private suspend fun executeRun(
     val started = ctx.runner.start(
         WorkflowRunRequest(
             workspaceId = ctx.workspaceId,
+            // 标题与模型直接交给 runner: 模型解析（provider/model / 显示名 / UUID）与
+            // "解析不到就报错并列出候选"的逻辑在那里, 工具层不做第二套。
+            title = params.strJson("title")?.takeIf { it.isNotBlank() },
+            modelSpec = params.strJson("model")?.takeIf { it.isNotBlank() },
+            defaultModelId = ctx.defaultModelId,
             conversationId = ctx.conversationId,
             assistantId = ctx.assistantId,
             source = script,
@@ -246,6 +260,7 @@ private suspend fun executeKill(
 private fun WorkflowRunEntity.toJson(includeResult: Boolean): JsonObject = buildJsonObject {
     put("runId", id)
     put("name", name)
+    put("model", modelName?.let { JsonPrimitive(it) } ?: JsonNull)
     put("status", status)
     put("finished", RunStatus.from(status).isFinished)
     put("phase", phase?.let { JsonPrimitive(it) } ?: JsonNull)

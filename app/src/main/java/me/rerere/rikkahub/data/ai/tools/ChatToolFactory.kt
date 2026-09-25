@@ -84,6 +84,8 @@ class ChatToolFactory(
                 cwd = workspaceCwd,
                 conversationId = conversationId,
                 assistantId = assistant.id.toString(),
+                // workflow 不指定模型时就用它 —— 这就是"主会话当前的模型"
+                modelId = model.id.toString(),
             )
         )
         if (assistant.enabledSkills.isNotEmpty()) {
@@ -121,6 +123,7 @@ class ChatToolFactory(
         cwd: String?,
         conversationId: String?,
         assistantId: String?,
+        modelId: String?,
     ): List<Tool> {
         if (workspaceId.isNullOrBlank()) return emptyList()
         val workspace = workspaceRepository.getById(workspaceId) ?: return emptyList()
@@ -156,6 +159,7 @@ class ChatToolFactory(
             // 区别是它起的是**一段代码**, 由脚本自己决定起多少个子代理。
             workflowContext = WorkflowToolContext(
                 workspaceId = workspaceId,
+                defaultModelId = modelId,
                 conversationId = conversationId,
                 assistantId = assistantId,
                 dao = workflowRunDao,

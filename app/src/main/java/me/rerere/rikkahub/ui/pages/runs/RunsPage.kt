@@ -276,6 +276,8 @@ private data class RunRow(
 private fun WorkflowRunEntity.toRow(): RunRow {
     val duration = runtimeMs ?: startedAt?.let { System.currentTimeMillis() - it }
     val stats = buildList {
+        // 模型放最前: "这次用的是哪个模型"是排查与对比时第一个要看的东西
+        modelName?.takeIf { it.isNotBlank() }?.let { add(it) }
         phase?.takeIf { it.isNotBlank() }?.let { add(it) }
         add(agentsCalled.toString() + " agents")
         if (agentsReused > 0) add(agentsReused.toString() + " 复用")

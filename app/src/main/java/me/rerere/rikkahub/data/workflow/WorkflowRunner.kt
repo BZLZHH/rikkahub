@@ -21,6 +21,9 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.dao.WorkflowRunDAO
 import me.rerere.rikkahub.data.db.entity.WorkflowAgentEntity
 import me.rerere.rikkahub.data.db.entity.WorkflowAgentResultEntity
+import me.rerere.rikkahub.data.datastore.ModelResolution
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.resolveModelSpec
 import me.rerere.rikkahub.data.db.entity.WorkflowRunEntity
 import me.rerere.rikkahub.data.run.RunStatus
 import java.util.concurrent.ConcurrentHashMap
@@ -43,6 +46,22 @@ data class WorkflowRunRequest(
     val cwd: String? = null,
     val maxSteps: Int = 20,
     val timeoutMillis: Long = WorkflowRuntime.DEFAULT_TIMEOUT_MS,
+    /**
+     * 这次运行在界面上显示的名字。
+     *
+     * 不填就退回脚本 meta.name —— 而内联脚本通常没有 meta, 于是界面上一律显示
+     * "(inline workflow)", 几个一起跑就完全分不清谁是谁。所以工具侧要求模型给个标题。
+     */
+    val title: String? = null,
+    /**
+     * 子代理用哪个模型。支持本地 UUID / `provider/model` / 显示名（见 [resolveModelSpec]）。
+     *
+     * 不填就用 [defaultModelId]（**主会话当前的模型**）—— 大多数情况下这才是用户期望的:
+     * 他说"用 workflow 去做 X"时, 心里想的是"用我正在聊的这个模型去做"。
+     */
+    val modelSpec: String? = null,
+    /** 主会话当前使用的模型 id; [modelSpec] 没给时的默认值。 */
+    val defaultModelId: String? = null,
 )
 
 sealed interface WorkflowStartResult {
@@ -104,15 +123,34 @@ class WorkflowRunner(
             request.name?.takeIf { it.isNotBlank() }?.let { WorkflowScriptStore.pathOf(it) }
         }
 
+        // 模型: 显式指定 -> 主会话当前模型 -> 快速模型。
+        // 解析失败**不要静默退回默认**: 那样"我明明指定了 Pro"会变成一个说不清的谜。
+        val settings = settingsStore.settingsFlowRaw.first()
+        val explicit = settings.resolveModelSpec(request.modelSpec)
+        if (explicit is ModelResolution.NotFound) {
+            return WorkflowStartResult.Rejected(
+                "unknown model \"" + explicit.spec + "\". Available: " +
+                    explicit.candidates.joinToString(", ")
+            )
+        }
+        val sessionModelId = request.defaultModelId
+            ?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+        val chosenModel = (explicit as? ModelResolution.Resolved)?.model
+            ?: settings.findModelById(sessionModelId, settings.fastModelId)
+
         val runId = Uuid.random().toString()
         val now = System.currentTimeMillis()
+        // 标题优先于 meta.name: 内联脚本往往没有 meta, 不填标题界面上就全是 "(inline workflow)"
+        val displayName = request.title?.trim()?.takeIf { it.isNotBlank() } ?: script.displayName
         dao.upsert(
             WorkflowRunEntity(
                 id = runId,
                 workspaceId = request.workspaceId,
                 conversationId = request.conversationId,
                 assistantId = request.assistantId,
-                name = script.displayName,
+                name = displayName,
+                modelName = chosenModel?.displayName?.takeIf { it.isNotBlank() }
+                    ?: chosenModel?.modelId,
                 fingerprint = script.fingerprint,
                 scriptPath = scriptPath,
                 status = RunStatus.RUNNING.name,
@@ -125,7 +163,7 @@ class WorkflowRunner(
         completions[runId] = completion
         val job = scope.launch {
             try {
-                val result = executeScript(runId, request, script)
+                val result = executeScript(runId, request, script, chosenModel?.id)
                 withContext(NonCancellable) {
                     val finishedAt = System.currentTimeMillis()
                     val row = dao.getById(runId)
@@ -182,7 +220,7 @@ class WorkflowRunner(
 
         return WorkflowStartResult.Started(
             runId = runId,
-            name = script.displayName,
+            name = displayName,
             fingerprint = script.fingerprint,
             scriptPath = scriptPath,
         )
@@ -193,6 +231,7 @@ class WorkflowRunner(
         runId: String,
         request: WorkflowRunRequest,
         script: WorkflowScript,
+        modelId: Uuid?,
     ): WorkflowExecutionResult {
         val progress = WorkflowRunProgress()
         // 脚本声明的 phases 先摆进左栏 —— 这样"还没跑到的阶段"也能看见,
@@ -212,6 +251,7 @@ class WorkflowRunner(
                     invoker.run(
                         call = call,
                         observer = observer,
+                        modelId = modelId,
                         conversationId = request.conversationId,
                         assistantId = request.assistantId,
                         cwd = request.cwd,

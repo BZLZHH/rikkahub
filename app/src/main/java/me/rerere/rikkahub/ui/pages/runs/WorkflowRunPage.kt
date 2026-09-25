@@ -114,6 +114,7 @@ fun WorkflowRunPage(runId: String) {
             run?.let { r ->
                 RunHeader(
                     name = r.name,
+                    modelName = r.modelName,
                     status = r.status,
                     phase = r.phase,
                     agentsCalled = r.agentsCalled,
@@ -158,6 +159,7 @@ fun WorkflowRunPage(runId: String) {
 @Composable
 private fun RunHeader(
     name: String,
+    modelName: String?,
     status: String,
     phase: String?,
     agentsCalled: Int,
@@ -185,6 +187,23 @@ private fun RunHeader(
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                // 模型 chip: 同一脚本换模型跑, 结果可能完全不同 —— 它必须一眼可见
+                modelName?.takeIf { it.isNotBlank() }?.let {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f),
+                    ) {
+                        Text(
+                            text = it,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.secondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Box(Modifier.weight(1f))
                 runtimeMs?.let {

@@ -23,6 +23,8 @@ data class WorkflowRunEntity(
     /** meta.name; 内联脚本若没写 meta 就是 "(inline workflow)" */
     val name: String,
     val fingerprint: String,
+    /** 这次运行用的是哪个模型（显示名）; 界面上要能看出"同一脚本这次换了模型" */
+    val modelName: String? = null,
     /** 脚本落盘路径（按名保存/复用时有值）; 纯内联脚本为 null */
     val scriptPath: String? = null,
     val status: String,
