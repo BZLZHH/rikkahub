@@ -51,6 +51,7 @@ fun JobLogDialog(
     var cursor by remember(job.id) { mutableStateOf(0L) }
     var status by remember(job.id) { mutableStateOf(job.status) }
     val copied = stringResource(R.string.job_copied)
+    val actionFailed = stringResource(R.string.jobs_action_failed)
     val stream = if (WorkspaceJobMode.from(job.mode) == WorkspaceJobMode.PTY) {
         JobLogStream.SCREEN
     } else {
@@ -110,11 +111,20 @@ fun JobLogDialog(
                     }
                 ) { Text(stringResource(R.string.job_action_copy_logs)) }
                 if (running) {
-                    TextButton(onClick = { scope.launch { manager.kill(job.id) } }) {
+                    TextButton(onClick = {
+                        scope.launch {
+                            val stopped = manager.kill(job.id)
+                            if (stopped) manager.waitFor(job.id, 5_000) else toaster.show(actionFailed)
+                        }
+                    }) {
                         Text(stringResource(R.string.job_action_stop))
                     }
                 } else {
-                    TextButton(onClick = { scope.launch { manager.restart(job.id) } }) {
+                    TextButton(onClick = {
+                        scope.launch {
+                            if (manager.restart(job.id) == null) toaster.show(actionFailed)
+                        }
+                    }) {
                         Text(stringResource(R.string.job_action_rerun))
                     }
                 }

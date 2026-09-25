@@ -82,6 +82,7 @@ fun JobsPage(conversationId: String? = null) {
     }
     val copied = stringResource(R.string.job_copied)
     val noWorkspace = stringResource(R.string.jobs_no_workspace)
+    val actionFailed = stringResource(R.string.jobs_action_failed)
 
     fun copyCommand(job: WorkspaceJobEntity) {
         clipboard.setText(AnnotatedString(job.command))
@@ -172,9 +173,18 @@ fun JobsPage(conversationId: String? = null) {
                                     job = job,
                                     running = true,
                                     onViewLogs = { logTarget = job },
-                                    onRerun = { scope.launch { manager.restart(job.id) } },
+                                    onRerun = {
+                                        scope.launch {
+                                            if (manager.restart(job.id) == null) toaster.show(actionFailed)
+                                        }
+                                    },
                                     onCopy = { copyCommand(job) },
-                                    onStop = { scope.launch { manager.kill(job.id) } },
+                                    onStop = {
+                                        scope.launch {
+                                            val stopped = manager.kill(job.id)
+                                            if (stopped) manager.waitFor(job.id, 5_000) else toaster.show(actionFailed)
+                                        }
+                                    },
                                     onDelete = {},
                                 )
                             },
@@ -207,7 +217,11 @@ fun JobsPage(conversationId: String? = null) {
                                     job = job,
                                     running = false,
                                     onViewLogs = { logTarget = job },
-                                    onRerun = { scope.launch { manager.restart(job.id) } },
+                                    onRerun = {
+                                        scope.launch {
+                                            if (manager.restart(job.id) == null) toaster.show(actionFailed)
+                                        }
+                                    },
                                     onCopy = { copyCommand(job) },
                                     onStop = {},
                                     onDelete = { scope.launch { manager.removeJob(job.id) } },

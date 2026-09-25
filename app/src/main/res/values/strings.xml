@@ -1477,6 +1477,7 @@
   <string name="jobs_overview_running">%1$d job(s) running</string>
   <string name="jobs_overview_today">%1$d finished in the last 24h</string>
   <string name="jobs_action_new">New job</string>
+  <string name="jobs_action_failed">Could not complete that action — the job may have already finished. Open its logs to check.</string>
   <string name="jobs_scope_title">Scope</string>
   <string name="jobs_scope_hint">Show only jobs started from this chat.</string>
   <string name="jobs_scope_only_this_chat">This chat</string>

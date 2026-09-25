@@ -53,6 +53,7 @@ fun WorkspaceJobsTab(workspaceId: String, modifier: Modifier = Modifier) {
     val defs by manager.defsFlow(workspaceId).collectAsStateWithLifecycle(initialValue = emptyList())
     var logTarget by remember { mutableStateOf<WorkspaceJobEntity?>(null) }
     val copied = stringResource(R.string.job_copied)
+    val actionFailed = stringResource(R.string.jobs_action_failed)
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -83,12 +84,21 @@ fun WorkspaceJobsTab(workspaceId: String, modifier: Modifier = Modifier) {
                                 job = job,
                                 running = running,
                                 onViewLogs = { logTarget = job },
-                                onRerun = { scope.launch { manager.restart(job.id) } },
+                                onRerun = {
+                                    scope.launch {
+                                        if (manager.restart(job.id) == null) toaster.show(actionFailed)
+                                    }
+                                },
                                 onCopy = {
                                     clipboard.setText(AnnotatedString(job.command))
                                     toaster.show(copied)
                                 },
-                                onStop = { scope.launch { manager.kill(job.id) } },
+                                onStop = {
+                                    scope.launch {
+                                        val stopped = manager.kill(job.id)
+                                        if (stopped) manager.waitFor(job.id, 5_000) else toaster.show(actionFailed)
+                                    }
+                                },
                                 onDelete = { scope.launch { manager.removeJob(job.id) } },
                             )
                         },

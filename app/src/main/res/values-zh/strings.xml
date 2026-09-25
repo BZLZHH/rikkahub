@@ -1457,6 +1457,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="jobs_overview_running">%1$d 个任务运行中</string>
   <string name="jobs_overview_today">最近 24 小时完成 %1$d 个</string>
   <string name="jobs_action_new">新建任务</string>
+  <string name="jobs_action_failed">这个操作没生效——任务可能已经结束了。可以打开日志确认一下。</string>
   <string name="jobs_scope_title">范围</string>
   <string name="jobs_scope_hint">只看这个会话里发起的任务。</string>
   <string name="jobs_scope_only_this_chat">本会话</string>
