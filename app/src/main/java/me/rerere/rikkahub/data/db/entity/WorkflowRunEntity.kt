@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.db.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -29,6 +30,17 @@ data class WorkflowRunEntity(
     val phase: String? = null,
     /** 阶段与日志的时间线（JSON 数组, 只保尾部） */
     val progressJson: String = "[]",
+    /**
+     * 脚本声明 / 走过的 phase 顺序（JSON 数组）。
+     *
+     * 光看进度时间线也能推出"见过哪些 phase", 但推不出顺序、更推不出"还没有 agent 的空阶段" ——
+     * 而空阶段恰恰要在左栏显示出来, 否则用户会以为那一阶段不存在。
+     *
+     * defaultValue 是**必须写的**: v30 -> v31 是自动迁移, 而 Room 拒绝"加一个没有默认值的
+     * NOT NULL 列"（既有行没法填）。写成 '[]' 而不是 [], 是因为这个字符串会原样进 SQL。
+     */
+    @ColumnInfo(defaultValue = "'[]'")
+    val phasesJson: String = "[]",
     /** 脚本 return 的值 */
     val resultJson: String? = null,
     val error: String? = null,

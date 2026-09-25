@@ -62,8 +62,27 @@ internal class WorkflowCallSession(val fingerprint: String) {
 
     val reused = AtomicInteger(0)
 
+    /**
+     * 当前 phase 与"脚本走过的 phase 顺序"。
+     *
+     * 记顺序而不是只记当前值: UI 的左栏要在**没有 agent 的 phase** 上也能显示出来
+     * （上游的 meta.phases 里就允许声明一个空阶段）, 只留当前值的话那些阶段会凭空消失。
+     */
+    @Volatile
+    var currentPhase: String? = null
+        private set
+
+    private val phaseOrder = java.util.Collections.synchronizedList(mutableListOf<String>())
+
     /** 已经分配出去的序号数, 也就是"这次运行尝试了多少个 agent 调用"。 */
     val total: Int get() = counter.get()
+
+    fun onPhase(title: String) {
+        currentPhase = title
+        synchronized(phaseOrder) { if (title !in phaseOrder) phaseOrder.add(title) }
+    }
+
+    fun phases(): List<String> = synchronized(phaseOrder) { phaseOrder.toList() }
 
     fun nextIndex(): Int = counter.getAndIncrement()
 

@@ -86,6 +86,9 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantPromptPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantRequestPage
 import me.rerere.rikkahub.ui.pages.backup.BackupPage
 import me.rerere.rikkahub.ui.pages.chat.ChatPage
+import me.rerere.rikkahub.ui.pages.runs.RunsPage
+import me.rerere.rikkahub.ui.pages.runs.SubSessionPage
+import me.rerere.rikkahub.ui.pages.runs.WorkflowRunPage
 import me.rerere.rikkahub.ui.pages.debug.DebugPage
 import me.rerere.rikkahub.ui.pages.extensions.ExtensionsPage
 import me.rerere.rikkahub.ui.pages.extensions.PromptPage
@@ -356,6 +359,18 @@ class RouteActivity : ComponentActivity() {
                                 )
                             }
 
+                            entry<Screen.Runs> { key ->
+                                RunsPage(conversationId = key.conversationId)
+                            }
+
+                            entry<Screen.WorkflowRun> { key ->
+                                WorkflowRunPage(runId = key.runId)
+                            }
+
+                            entry<Screen.SubSession> { key ->
+                                SubSessionPage(sessionId = key.sessionId, title = key.title)
+                            }
+
                             entry<Screen.History> {
                                 HistoryPage()
                             }
@@ -622,6 +637,27 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class ShareHandler(val text: String, val streamUri: String? = null) : Screen
+
+    /**
+     * 运行中心: workflow 与子代理同屏（全新的一版可视化 UI）。
+     *
+     * 从会话内进来时带 conversationId, 默认只看本会话发起的 —— 与后台任务页同一套做法。
+     */
+    @Serializable
+    data class Runs(val conversationId: String? = null) : Screen
+
+    /** 单个 workflow 运行: phases 侧栏 + agent 列表。 */
+    @Serializable
+    data class WorkflowRun(val runId: String) : Screen
+
+    /**
+     * 一个子代理的**完整子会话** —— 作为主会话的子页面打开。
+     *
+     * sessionId 就是那次子代理运行的转录 id（workflow 的 agent 也是同一个东西,
+     * 所以这一个页面同时服务于"workflow 里的某个 agent"和"直接派的子代理"）。
+     */
+    @Serializable
+    data class SubSession(val sessionId: String, val title: String = "") : Screen
 
     @Serializable
     data object History : Screen

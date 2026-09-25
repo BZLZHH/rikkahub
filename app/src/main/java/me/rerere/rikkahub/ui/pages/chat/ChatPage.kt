@@ -58,8 +58,11 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.rikkahub.data.db.dao.AgentRunDAO
+import me.rerere.rikkahub.data.db.dao.WorkflowRunDAO
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Cpu
+import me.rerere.hugeicons.stroke.GitFork
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
@@ -707,6 +710,31 @@ private fun TopBar(
                     }
                 ) {
                     Icon(HugeIcons.Cpu, stringResource(R.string.jobs_page_title))
+                }
+            }
+            // 运行中心: workflow 与子代理同屏, 并且能下钻到每个 agent 的**完整子会话**。
+            // 与左侧的后台任务角标并列, 但分开计数 —— 它们是两种不同的执行体。
+            val workflowRunDao: WorkflowRunDAO = koinInject()
+            val agentRunDao: AgentRunDAO = koinInject()
+            val runsNav = LocalNavController.current
+            val runningWorkflows by workflowRunDao.runningCountFlow()
+                .collectAsStateWithLifecycle(initialValue = 0)
+            val runningAgents by agentRunDao.listRunningFlow()
+                .collectAsStateWithLifecycle(initialValue = emptyList())
+            IconButton(
+                onClick = {
+                    runsNav.navigate(Screen.Runs(conversation.id.toString()))
+                }
+            ) {
+                BadgedBox(
+                    badge = {
+                        val total = runningWorkflows + runningAgents.size
+                        if (total > 0) {
+                            Badge { Text(total.toString()) }
+                        }
+                    }
+                ) {
+                    Icon(HugeIcons.GitFork, "运行")
                 }
             }
             IconButton(

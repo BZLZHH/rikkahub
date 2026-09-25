@@ -28,6 +28,7 @@ import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.db.entity.AgentRunEntity
 import me.rerere.rikkahub.data.db.entity.WorkspaceJobDefEntity
 import me.rerere.rikkahub.data.db.entity.WorkspaceJobEntity
+import me.rerere.rikkahub.data.db.entity.WorkflowAgentEntity
 import me.rerere.rikkahub.data.db.entity.WorkflowAgentResultEntity
 import me.rerere.rikkahub.data.db.entity.WorkflowRunEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
@@ -51,11 +52,16 @@ import me.rerere.rikkahub.utils.JsonInstant
         // workflow: 运行账目 + 可恢复性存档（后者按「脚本指纹 + 调用序号」存每个 agent 的产出）
         WorkflowRunEntity::class,
         WorkflowAgentResultEntity::class,
+        // 逐 agent 的行: 高可读性 UI 的右栏（标签 / 模型 / token / 耗时 / 子会话 id）
+        WorkflowAgentEntity::class,
     ],
     // v29 这个版本号**被复用出过事故**: 早先那套被移除的实现也用过 v29,
     // 装过它的设备上 user_version 已经是 29, 于是 Room 不跑迁移、直接比对 identity hash 并崩溃。
-    // 现在往上加一位到 30, 由 Migration_29_30 把真正的两张表补上（见该文件的注释）。
-    version = 30,
+    // v30 由 Migration_29_30 把两张表补上（见该文件的注释）。
+    //
+    // v31: 加"逐 agent 的行"。**绝不复用版本号** —— 30 已经交出去过（用户手上那版 APK 就是 30）,
+    // 复用它会原样重演上面那次事故。
+    version = 31,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -81,6 +87,8 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 27, to = 28),
         // 只新增两张表, 没有改动既有列, 所以是纯粹的自动迁移
         AutoMigration(from = 28, to = 29),
+        // v30 -> v31: 只新增一张表 + workflow_runs 加一列, 纯自动迁移。
+        AutoMigration(from = 30, to = 31),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)

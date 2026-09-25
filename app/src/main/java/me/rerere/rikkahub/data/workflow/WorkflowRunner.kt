@@ -13,11 +13,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.dao.WorkflowRunDAO
+import me.rerere.rikkahub.data.db.entity.WorkflowAgentEntity
 import me.rerere.rikkahub.data.db.entity.WorkflowAgentResultEntity
 import me.rerere.rikkahub.data.db.entity.WorkflowRunEntity
 import me.rerere.rikkahub.data.run.RunStatus
@@ -193,51 +195,175 @@ class WorkflowRunner(
         script: WorkflowScript,
     ): WorkflowExecutionResult {
         val progress = WorkflowRunProgress()
+        // 脚本声明的 phases 先摆进左栏 —— 这样"还没跑到的阶段"也能看见,
+        // 而不是等第一个 agent 起来才凭空冒出来一个分组。
+        progress.seedPhases(script.meta?.phases.orEmpty())
+        val tracker = DaoAgentTracker(runId)
         val flusher = scope.launch {
             while (isActive) {
                 delay(PROGRESS_FLUSH_MS)
-                flushProgress(runId, progress)
+                flushProgress(runId, progress, tracker)
             }
         }
         try {
             val agentConcurrency = settingsStore.settingsFlowRaw.first().maxConcurrentAgents
             val runtime = WorkflowRuntime(
-                agentHandler = WorkflowAgentHandler { prompt, _, label ->
+                agentHandler = WorkflowAgentHandler { call, observer ->
                     invoker.run(
+                        call = call,
+                        observer = observer,
                         conversationId = request.conversationId,
                         assistantId = request.assistantId,
                         cwd = request.cwd,
                         maxSteps = request.maxSteps,
-                        prompt = prompt,
-                        label = label,
                     )
                 },
                 progress = progress,
                 timeoutMillis = request.timeoutMillis,
                 journal = DaoWorkflowJournal(dao),
                 agentConcurrency = agentConcurrency,
+                tracker = tracker,
             )
             return runtime.execute(script, request.args)
         } finally {
             flusher.cancel()
-            withContext(NonCancellable) { flushProgress(runId, progress) }
+            withContext(NonCancellable) { flushProgress(runId, progress, tracker) }
+        }
+    }
+
+/**
+     * 把逐 agent 的行写进库。
+     *
+     * 分工: 高频的**过程**（token / 步骤）先攒在内存, 由 [PROGRESS_FLUSH_MS] 的刷子统一写;
+     * 低频的**起止**（start / finish）立刻写 —— 那两个时刻正是 UI 最需要及时反映的。
+     * 每个 chunk 都写一次数据库会把库打爆, 而 token 数并不需要毫秒级准确。
+     */
+    private inner class DaoAgentTracker(private val runId: String) : WorkflowAgentTracker {
+        private val live = ConcurrentHashMap<Int, LiveAgentState>()
+
+        override suspend fun start(call: WorkflowAgentCall, reused: Boolean): WorkflowAgentObserver {
+            val state = LiveAgentState()
+            live[call.callIndex] = state
+            runCatching {
+                dao.upsertAgent(
+                    WorkflowAgentEntity(
+                        runId = runId,
+                        callIndex = call.callIndex,
+                        label = call.label,
+                        prompt = call.prompt,
+                        phase = call.phase,
+                        // 复用命中的行一出生就是完成态: 它确实"完成"了, 只是没花时间
+                        status = if (reused) RunStatus.SUCCEEDED.name else RunStatus.RUNNING.name,
+                        reused = reused,
+                        startedAt = System.currentTimeMillis(),
+                    )
+                )
+            }.onFailure { Log.w(TAG, "agent row insert failed for " + runId + "#" + call.callIndex, it) }
+
+            return object : WorkflowAgentObserver {
+                override fun onModel(modelId: String, modelName: String) {
+                    state.modelId = modelId
+                    state.modelName = modelName
+                    state.dirty = true
+                }
+
+                override fun onProgress(steps: Int, toolCalls: Int, tokensIn: Int, tokensOut: Int) {
+                    state.steps = steps
+                    state.toolCalls = toolCalls
+                    state.tokensIn = tokensIn
+                    state.tokensOut = tokensOut
+                    state.dirty = true
+                }
+
+                override fun onSession(sessionId: String) {
+                    state.sessionId = sessionId
+                    state.dirty = true
+                }
+            }
+        }
+
+        override suspend fun finish(
+            call: WorkflowAgentCall,
+            reused: Boolean,
+            status: String,
+            resultText: String?,
+            error: String?,
+        ) {
+            val state = live.remove(call.callIndex)
+            runCatching {
+                val existing = dao.getAgent(runId, call.callIndex)
+                val finishedAt = System.currentTimeMillis()
+                val startedAt = existing?.startedAt ?: finishedAt
+                dao.upsertAgent(
+                    (existing ?: WorkflowAgentEntity(
+                        runId = runId,
+                        callIndex = call.callIndex,
+                        label = call.label,
+                        prompt = call.prompt,
+                        phase = call.phase,
+                        status = status,
+                    )).copy(
+                        status = status,
+                        reused = reused,
+                        modelId = state?.modelId ?: existing?.modelId,
+                        modelName = state?.modelName ?: existing?.modelName,
+                        steps = state?.steps ?: 0,
+                        toolCalls = state?.toolCalls ?: 0,
+                        tokensIn = state?.tokensIn ?: 0,
+                        tokensOut = state?.tokensOut ?: 0,
+                        sessionId = state?.sessionId ?: existing?.sessionId,
+                        resultText = resultText,
+                        error = error,
+                        finishedAt = finishedAt,
+                        runtimeMs = finishedAt - startedAt,
+                    )
+                )
+            }.onFailure { Log.w(TAG, "agent row finish failed for " + runId + "#" + call.callIndex, it) }
+        }
+
+        /** 把"过程中变化过"的行刷一遍。没有变化的行不写。 */
+        suspend fun flushDirty() {
+            live.forEach { (index, state) ->
+                if (!state.dirty) return@forEach
+                runCatching {
+                    val existing = dao.getAgent(runId, index) ?: return@forEach
+                    dao.updateAgent(
+                        existing.copy(
+                            modelId = state.modelId ?: existing.modelId,
+                            modelName = state.modelName ?: existing.modelName,
+                            steps = state.steps,
+                            toolCalls = state.toolCalls,
+                            tokensIn = state.tokensIn,
+                            tokensOut = state.tokensOut,
+                            sessionId = state.sessionId ?: existing.sessionId,
+                        )
+                    )
+                    state.dirty = false
+                }.onFailure { Log.w(TAG, "agent row flush failed for " + runId + "#" + index, it) }
+            }
         }
     }
 
     /** 把内存里攒的进度刷进库。频率由 [PROGRESS_FLUSH_MS] 控制, 不是每条日志一次 UPDATE。 */
-    private suspend fun flushProgress(runId: String, progress: WorkflowRunProgress) {
+    private suspend fun flushProgress(
+        runId: String,
+        progress: WorkflowRunProgress,
+        tracker: DaoAgentTracker? = null,
+    ) {
         runCatching {
             dao.getById(runId)?.let { row ->
                 dao.upsert(
                     row.copy(
                         phase = progress.phase ?: row.phase,
                         progressJson = progress.snapshotJson(),
+                        phasesJson = progress.phasesJson(),
                         agentsCalled = progress.agentsCalled,
                         agentsReused = progress.agentsReused,
                     )
                 )
             }
         }.onFailure { Log.w(TAG, "progress flush failed for " + runId, it) }
+        tracker?.flushDirty()
     }
 
     /** 等一次运行结束; 返回是否在超时前结束。 */
@@ -363,11 +489,26 @@ private class WorkflowRunProgress : WorkflowProgressSink {
     var agentsReused: Int = 0
         private set
 
+    /** 左栏的顺序: 脚本声明的在前, 实际走过的按首次出现追加。 */
+    private val phases = mutableListOf<String>()
+
     override fun onPhase(title: String) {
         synchronized(lock) {
             phase = title
+            if (title.isNotBlank() && title !in phases) phases.add(title)
             add("phase", title)
         }
+    }
+
+    /** 脚本 run 之前先把 meta.phases 摆进来 —— 空阶段也要看得见。 */
+    fun seedPhases(declared: List<String>) {
+        synchronized(lock) {
+            declared.filter { it.isNotBlank() }.forEach { if (it !in phases) phases.add(it) }
+        }
+    }
+
+    fun phasesJson(): String = synchronized(lock) {
+        JsonArray(phases.map { JsonPrimitive(it) }).toString()
     }
 
     override fun onLog(message: String, level: String) {
@@ -391,4 +532,21 @@ private class WorkflowRunProgress : WorkflowProgressSink {
         )
         while (entries.size > WorkflowRunner.MAX_TIMELINE_ENTRIES) entries.removeFirst()
     }
+}
+
+/**
+ * 一个正在跑的 agent 的**过程**状态。
+ *
+ * 只活在内存里, 由 [WorkflowRunner.DaoAgentTracker] 定期刷进库。
+ * 全用 @Volatile: 写它的线程是子代理的收集协程, 读它的线程是刷库的定时器。
+ */
+private class LiveAgentState {
+    @Volatile var modelId: String? = null
+    @Volatile var modelName: String? = null
+    @Volatile var steps: Int = 0
+    @Volatile var toolCalls: Int = 0
+    @Volatile var tokensIn: Int = 0
+    @Volatile var tokensOut: Int = 0
+    @Volatile var sessionId: String? = null
+    @Volatile var dirty: Boolean = true
 }

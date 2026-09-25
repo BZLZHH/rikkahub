@@ -9,6 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.AppDatabase_AutoMigration_28_29_Impl
+import me.rerere.rikkahub.data.db.AppDatabase_AutoMigration_30_31_Impl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -134,6 +135,34 @@ class Migration_29_30_Test {
 
         val runs = db.query("SELECT * FROM workflow_runs LIMIT 0")
         assertTrue("v28 一路升上来也该有 workflow_runs", runs.columnNames.contains("fingerprint"))
+        runs.close()
+        db.close()
+    }
+
+    /**
+     * v30 -> v31: 加"逐 agent 的行" + workflow_runs 加 phasesJson 列。
+     *
+     * v30 是**已经交出去过**的那版 APK, 所以这一步必须真的能从 30 升上来 ——
+     * 不能再犯"复用版本号"的错（那次的后果是启动即崩）。
+     */
+    @Test
+    fun migrateV30ToV31_addsAgentRowsTable() {
+        helper.createDatabase(TEST_DB, 30).apply { close() }
+
+        val db = helper.runMigrationsAndValidate(
+            TEST_DB, 31, true,
+            AppDatabase_AutoMigration_30_31_Impl(),
+        )
+
+        val agents = db.query("SELECT * FROM workflow_agents LIMIT 0")
+        val columns = agents.columnNames.toList()
+        agents.close()
+        listOf("runId", "callIndex", "label", "phase", "sessionId", "tokensIn").forEach { column ->
+            assertTrue("workflow_agents 缺少列 " + column + ", 实际: " + columns, column in columns)
+        }
+
+        val runs = db.query("SELECT * FROM workflow_runs LIMIT 0")
+        assertTrue("workflow_runs 应当有 phasesJson", runs.columnNames.contains("phasesJson"))
         runs.close()
         db.close()
     }

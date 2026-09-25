@@ -26,14 +26,17 @@ class WorkflowRuntimeSemanticsTest {
         agentConcurrency: Int = 4,
         maxAgents: Int = WorkflowLimits.MAX_AGENTS_PER_RUN,
         maxSchemaAttempts: Int = WorkflowLimits.MAX_SCHEMA_ATTEMPTS,
+        tracker: WorkflowAgentTracker = NoopWorkflowAgentTracker,
     ) = WorkflowRuntime(
-        agentHandler = WorkflowAgentHandler { prompt, schema, label -> onAgent(prompt, schema, label) },
+        // 契约升级成"一次调用"对象后, 测试仍只需要看提示词/schema/label 三样
+        agentHandler = WorkflowAgentHandler { call, _ -> onAgent(call.prompt, call.schemaJson, call.label) },
         progress = progress,
         timeoutMillis = 10_000,
         journal = journal,
         agentConcurrency = agentConcurrency,
         maxAgents = maxAgents,
         maxSchemaAttempts = maxSchemaAttempts,
+        tracker = tracker,
     )
 
     /** 失败信息加引号带长度: 字面量 "null" 与真 null 打印出来一模一样, 这坑踩过一次。 */
@@ -285,6 +288,82 @@ class WorkflowRuntimeSemanticsTest {
         )
         assertTrue("应成功: " + show(r.error), r.ok)
         assertTrue("应当解析出 JSON: " + r.resultJson, r.resultJson!!.contains("x"))
+    }
+
+    // ---- 落库/UI 契约 ----
+
+    /** 记录每一次调用的起止。UI 的右栏就是照这个写出来的, 所以它的语义要锁住。 */
+    private class RecordingTracker : WorkflowAgentTracker {
+        val started = mutableListOf<Pair<WorkflowAgentCall, Boolean>>()
+        /** callIndex -> (reused, status) */
+        val finished = mutableListOf<Triple<Int, Boolean, String>>()
+        val sessions = mutableListOf<String>()
+
+        override suspend fun start(call: WorkflowAgentCall, reused: Boolean): WorkflowAgentObserver {
+            started += call to reused
+            return object : WorkflowAgentObserver {
+                override fun onSession(sessionId: String) { sessions += sessionId }
+            }
+        }
+
+        override suspend fun finish(
+            call: WorkflowAgentCall,
+            reused: Boolean,
+            status: String,
+            resultText: String?,
+            error: String?,
+        ) {
+            finished += Triple(call.callIndex, reused, status)
+        }
+    }
+
+    @Test
+    fun trackerSeesPhaseAndReuse() = runBlocking {
+        // UI 左栏按 phase 分组、右栏标"复用" —— 这两件事都靠这里传出去的信息。
+        val journal = InMemoryWorkflowJournal()
+        val tracker = RecordingTracker()
+        val calls = AtomicInteger(0)
+        val script = WorkflowScriptParser.parse(
+            "phase(\"sweep\")\nconst a = await agent(\"a\")\n" +
+                "phase(\"verify\")\nconst b = await agent(\"b\")\nreturn [a, b]",
+        )
+        suspend fun go(): WorkflowExecutionResult = runtime(
+            onAgent = { _, _, _ -> "r" + calls.incrementAndGet() },
+            journal = journal,
+            tracker = tracker,
+        ).execute(script)
+
+        val first = go()
+        assertTrue("应成功: " + show(first.error), first.ok)
+        assertEquals("phase 顺序要能报出来（左栏顺序）", listOf("sweep", "verify"), first.phases)
+        assertEquals(
+            "每个 agent 要带上它起跑时所在的 phase",
+            listOf("sweep", "verify"),
+            tracker.started.map { it.first.phase },
+        )
+        assertEquals(listOf(false, false), tracker.started.map { it.second })
+        assertEquals(2, tracker.finished.size)
+
+        val second = go()
+        assertEquals("第二趟应当全部命中存档", 2, second.agentsReused)
+        assertEquals(
+            "复用命中的调用也要被记下来（否则 UI 上看不出省了工作）",
+            listOf(true, true),
+            tracker.started.drop(2).map { it.second },
+        )
+        assertEquals("复用不该再真的跑 agent", 2, calls.get())
+    }
+
+    @Test
+    fun trackerClosesFailedCalls() = runBlocking {
+        val tracker = RecordingTracker()
+        val r = run(
+            "return await agent(\"x\", { schema: { type: \"object\" } })",
+            runtime(maxSchemaAttempts = 2, onAgent = { _, _, _ -> "永远不是 JSON" }, tracker = tracker),
+        )
+        assertFalse("应当失败", r.ok)
+        assertEquals("失败的调用也必须收尾, 否则 UI 上会永远停在\"运行中\"", 1, tracker.finished.size)
+        assertEquals("FAILED", tracker.finished.single().third)
     }
 
     // ---- 进度 ----

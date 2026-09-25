@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import me.rerere.rikkahub.data.run.RunStatus
 import me.rerere.rikkahub.utils.JsonInstant
 
 /** 脚本想要一个子代理干活时, 运行时需要提供的唯一能力。 */
@@ -18,12 +19,11 @@ fun interface WorkflowAgentHandler {
     /**
      * 跑一个子代理并等它结束。
      *
-     * @param prompt 交给子代理的指令
-     * @param schemaJson 结构化输出要求（JSON Schema 字符串）; null 表示要散文
-     * @param label 进度视图里的名字
+     * @param call 这次调用的身份与上下文（序号 / 提示词 / label / 所处 phase）
+     * @param observer 过程上报; UI 靠它显示模型、token 与**子会话 id**
      * @return 子代理的产出; 被停止或不可恢复错误时返回 null（脚本据此判断）
      */
-    suspend fun run(prompt: String, schemaJson: String?, label: String?): String?
+    suspend fun run(call: WorkflowAgentCall, observer: WorkflowAgentObserver): String?
 }
 
 /** 运行时的进度回调（阶段 / 日志 / agent 计数）。 */
@@ -45,6 +45,8 @@ data class WorkflowExecutionResult(
     /** 这次运行里 agent 的调用次数与其中复用了存档的次数（可恢复性的可观测证据） */
     val agentsCalled: Int = 0,
     val agentsReused: Int = 0,
+    /** 脚本实际走过的 phase 顺序（UI 的左栏用它, 空 phase 也要显示出来） */
+    val phases: List<String> = emptyList(),
 )
 
 /** 超出了单次运行的硬上限（agent 调用总数等）。 */
@@ -77,6 +79,12 @@ class WorkflowRuntime(
     private val agentConcurrency: Int = DEFAULT_AGENT_CONCURRENCY,
     private val maxAgents: Int = WorkflowLimits.MAX_AGENTS_PER_RUN,
     private val maxSchemaAttempts: Int = WorkflowLimits.MAX_SCHEMA_ATTEMPTS,
+    /**
+     * 逐 agent 落库（UI 的右栏就是它写出来的）。
+     *
+     * 默认空实现: 单测与"只关心脚本返回值"的调用方不必被迫接这一层。
+     */
+    private val tracker: WorkflowAgentTracker = NoopWorkflowAgentTracker,
 ) {
 
     suspend fun execute(
@@ -109,13 +117,17 @@ class WorkflowRuntime(
                 error = describe(error),
                 agentsCalled = session.total,
                 agentsReused = session.reused.get(),
+                phases = session.phases(),
             )
         }
     }
 
     private fun com.dokar.quickjs.QuickJs.installHostApi(session: WorkflowCallSession, gate: Semaphore) {
         function("__rhePhase") { args: Array<Any?> ->
-            progress?.onPhase(args.getOrNull(0) as? String ?: "")
+            val title = args.getOrNull(0) as? String ?: ""
+            // 运行时自己也要记: 后续每个 agent 调用要带上"它是在哪个 phase 里起的"
+            session.onPhase(title)
+            progress?.onPhase(title)
         }
         function("__rheLog") { args: Array<Any?> ->
             progress?.onLog(
@@ -148,21 +160,46 @@ class WorkflowRuntime(
             )
         }
         progress?.onAgentProgress(session.total, session.reused.get())
+        val call = WorkflowAgentCall(
+            callIndex = index,
+            prompt = prompt,
+            schemaJson = schemaJson,
+            label = label,
+            phase = session.currentPhase,
+        )
 
-        recall(session, index, prompt, schemaJson, label)?.let { return it }
+        val cached = recall(session, index, prompt, schemaJson, label)
+        if (cached != null) {
+            // 复用命中也要在 UI 上留一行。否则"这一趟跑得飞快"看起来像丢了一堆工作,
+            // 而用户无从知道那是复用生效 —— 可恢复性最需要被看见的就是这一刻。
+            tracker.start(call, reused = true)
+            tracker.finish(call, reused = true, status = RunStatus.SUCCEEDED.name, resultText = cached, error = null)
+            return cached
+        }
 
-        val text = gate.withPermit { invokeAgent(index, prompt, schemaJson, label) }
+        val observer = tracker.start(call, reused = false)
+        val text = try {
+            gate.withPermit { invokeAgent(index, call, observer) }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            tracker.finish(call, reused = false, status = RunStatus.KILLED.name, resultText = null, error = "stopped")
+            throw e
+        } catch (e: Throwable) {
+            tracker.finish(call, reused = false, status = RunStatus.FAILED.name, resultText = null, error = describe(e))
+            throw e
+        }
         if (text == null) {
             // 被停止或不可恢复错误: 上游约定 agent() 返回 null, 且**不存档** ——
             // 下一趟重跑必须重做它（"still running when you stopped: starts over"）。
             session.stopReuseFrom(index)
             progress?.onLog("agent #" + index + " 没有产出（被停止或不可恢复错误）", "warn")
+            tracker.finish(call, reused = false, status = RunStatus.FAILED.name, resultText = null, error = "no output")
             return null
         }
         journal?.remember(
             session.fingerprint,
             WorkflowAgentRecord(index, prompt, schemaJson, label, text),
         )
+        tracker.finish(call, reused = false, status = RunStatus.SUCCEEDED.name, resultText = text, error = null)
         return text
     }
 
@@ -206,23 +243,27 @@ class WorkflowRuntime(
      */
     private suspend fun invokeAgent(
         index: Int,
-        prompt: String,
-        schemaJson: String?,
-        label: String?,
+        call: WorkflowAgentCall,
+        observer: WorkflowAgentObserver,
     ): String? {
-        if (schemaJson == null) return agentHandler.run(prompt, null, label)
+        val prompt = call.prompt
+        val schemaJson = call.schemaJson
+        if (schemaJson == null) return agentHandler.run(call, observer)
 
         val schema = WorkflowStructuredOutput.parseLoosely(schemaJson) as? JsonObject
         if (schema == null) {
             progress?.onLog("agent #" + index + " 的 schema 不是 JSON 对象, 跳过校验", "warn")
-            return agentHandler.run(WorkflowStructuredOutput.structuredPrompt(prompt, schemaJson), null, label)
+            return agentHandler.run(
+                call.copy(prompt = WorkflowStructuredOutput.structuredPrompt(prompt, schemaJson)),
+                observer,
+            )
         }
         WorkflowStructuredOutput.checkSchema(schema)?.let { throw WorkflowSchemaException(it) }
 
         var lastFailure: String? = null
         var currentPrompt = WorkflowStructuredOutput.structuredPrompt(prompt, schemaJson)
         repeat(maxSchemaAttempts) { attempt ->
-            val text = agentHandler.run(currentPrompt, schemaJson, label) ?: return null
+            val text = agentHandler.run(call.copy(prompt = currentPrompt), observer) ?: return null
             val parsed = WorkflowStructuredOutput.parseLoosely(text)
             val failure = if (parsed == null) {
                 "输出不是合法 JSON"
@@ -272,6 +313,7 @@ class WorkflowRuntime(
                 error = "workflow timed out; last state = " + (DIAGNOSTIC ?: "<never read>"),
                 agentsCalled = session.total,
                 agentsReused = session.reused.get(),
+                phases = session.phases(),
             )
         }
         val obj = runCatching {
@@ -292,6 +334,7 @@ class WorkflowRuntime(
                 error = message ?: "workflow failed",
                 agentsCalled = session.total,
                 agentsReused = session.reused.get(),
+                phases = session.phases(),
             )
         }
         val hasResult = (obj["hasResult"] as? JsonPrimitive)?.booleanOrNull == true
@@ -301,6 +344,7 @@ class WorkflowRuntime(
             error = null,
             agentsCalled = session.total,
             agentsReused = session.reused.get(),
+            phases = session.phases(),
         )
     }
 

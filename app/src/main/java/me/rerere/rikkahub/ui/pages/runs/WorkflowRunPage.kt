@@ -1,0 +1,454 @@
+package me.rerere.rikkahub.ui.pages.runs
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.db.dao.WorkflowRunDAO
+import me.rerere.rikkahub.data.db.entity.WorkflowAgentEntity
+import me.rerere.rikkahub.data.run.RunStatus
+import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.utils.JsonInstant
+import org.koin.compose.koinInject
+
+/**
+ * 单个 workflow 运行的状态页。
+ *
+ * 布局直接照搬上游 TUI 的骨架 —— 左栏是 phases, 右栏是当前 phase 下的 agents:
+ * 这个分工之所以好用, 是因为它把"剧本走到哪了"和"这一步里谁在干活"分在了两个视觉层,
+ * 扫一眼就能同时读到进度与细节。手机上竖屏也放得下（左栏 104dp）。
+ *
+ * 比 TUI 多出来的东西:
+ * - 顶部的**分段进度条**: 完成/在跑/失败各占一段, 一眼看出整体形状;
+ * - 每一行点进去就是那个 agent 的**完整子会话** —— TUI 只能看最近几次工具调用,
+ *   这里能看到整段对话（这是本次要的重点）。
+ */
+@Composable
+fun WorkflowRunPage(runId: String) {
+    val dao: WorkflowRunDAO = koinInject()
+    val nav = LocalNavController.current
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
+    val run by dao.getByIdFlow(runId).collectAsStateWithLifecycle(initialValue = null)
+    val agents by dao.listAgentsFlow(runId).collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val declared = remember(run?.phasesJson) { parseStringList(run?.phasesJson) }
+    // 左栏的顺序: 脚本声明的在前, 实际出现过的补在后面（脚本可能用了没声明的 phase）
+    val phaseNames = remember(declared, agents) {
+        val observed = agents.mapNotNull { it.phase }.distinct()
+        (declared + observed).distinct()
+    }
+    val ungrouped = agents.filter { it.phase == null }
+    val showUngrouped = phaseNames.isEmpty() || ungrouped.isNotEmpty()
+
+    var selected by remember { mutableStateOf<String?>(null) }
+    val currentPhase = selected ?: phaseNames.firstOrNull()
+
+    val visibleAgents = remember(agents, currentPhase, showUngrouped) {
+        when {
+            currentPhase != null -> agents.filter { it.phase == currentPhase }
+            showUngrouped -> ungrouped
+            else -> agents
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            LargeFlexibleTopAppBar(
+                title = {
+                    Column {
+                        Text(run?.name ?: "workflow", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        run?.let { Text(it.fingerprint.take(8), style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace) }
+                    }
+                },
+                navigationIcon = { BackButton() },
+                scrollBehavior = scrollBehavior,
+                colors = CustomColors.topBarColors,
+            )
+        },
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = CustomColors.topBarColors.containerColor,
+    ) { contentPadding ->
+        Column(Modifier.fillMaxSize().padding(contentPadding)) {
+            run?.let { r ->
+                RunHeader(
+                    name = r.name,
+                    status = r.status,
+                    phase = r.phase,
+                    agentsCalled = r.agentsCalled,
+                    agentsReused = r.agentsReused,
+                    runtimeMs = r.runtimeMs ?: r.startedAt?.let { System.currentTimeMillis() - it },
+                    tokens = agents.sumOf { it.tokensIn + it.tokensOut },
+                    agents = agents,
+                    error = r.error,
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Row(Modifier.fillMaxSize().height(IntrinsicSize.Min)) {
+                PhaseRail(
+                    phases = phaseNames,
+                    ungroupedCount = if (showUngrouped && phaseNames.isNotEmpty()) ungrouped.size else null,
+                    agents = agents,
+                    selected = currentPhase,
+                    onSelect = { selected = it },
+                )
+                VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                AgentList(
+                    agents = visibleAgents,
+                    modifier = Modifier.weight(1f),
+                    onOpen = { agent ->
+                        agent.sessionId?.let { sessionId ->
+                            nav.navigate(
+                                Screen.SubSession(
+                                    sessionId = sessionId,
+                                    title = agent.label ?: ("agent #" + agent.callIndex),
+                                )
+                            )
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RunHeader(
+    name: String,
+    status: String,
+    phase: String?,
+    agentsCalled: Int,
+    agentsReused: Int,
+    runtimeMs: Long?,
+    tokens: Int,
+    agents: List<WorkflowAgentEntity>,
+    error: String?,
+) {
+    val accent = statusColor(status)
+    Surface(color = CustomColors.topBarColors.containerColor) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                StatusDot(status, size = 12)
+                Text(statusLabel(status), style = MaterialTheme.typography.labelLarge, color = accent)
+                phase?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        text = "· " + it,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Box(Modifier.weight(1f))
+                runtimeMs?.let {
+                    Text(
+                        text = formatDuration(it),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+
+            // 分段进度条: 完成 / 在跑 / 失败各占一段, 整体形状一眼可读
+            ProgressBar(agents)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                HeaderStat("agents", agentsCalled.toString())
+                if (agentsReused > 0) HeaderStat("复用", agentsReused.toString())
+                HeaderStat("tok", formatTokens(tokens))
+                HeaderStat("phase", (agents.mapNotNull { it.phase }.distinct().size).toString())
+            }
+
+            error?.takeIf { it.isNotBlank() }?.let {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                ) {
+                    Text(
+                        text = it,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeaderStat(label: String, value: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Bottom) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelLarge,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** 一条把"完成 / 在跑 / 失败 / 还没开始"同时表达出来的条。空列表时退化成一条底色。 */
+@Composable
+private fun ProgressBar(agents: List<WorkflowAgentEntity>) {
+    val done = agents.count { it.reused || RunStatus.from(it.status) == RunStatus.SUCCEEDED }
+    val running = agents.count {
+        val s = RunStatus.from(it.status)
+        s == RunStatus.RUNNING || s == RunStatus.PENDING
+    }
+    val failed = agents.count {
+        val s = RunStatus.from(it.status)
+        s == RunStatus.FAILED || s == RunStatus.KILLED || s == RunStatus.TIMED_OUT ||
+            s == RunStatus.INTERRUPTED
+    }
+    val total = agents.size.coerceAtLeast(1)
+    Row(
+        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        if (done > 0) Box(Modifier.weight(done.toFloat() / total).fillMaxHeight().background(MaterialTheme.colorScheme.tertiary))
+        if (running > 0) Box(Modifier.weight(running.toFloat() / total).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
+        if (failed > 0) Box(Modifier.weight(failed.toFloat() / total).fillMaxHeight().background(MaterialTheme.colorScheme.error))
+        val rest = total - done - running - failed
+        if (rest > 0) Box(Modifier.weight(rest.toFloat() / total).fillMaxHeight())
+    }
+}
+
+@Composable
+private fun PhaseRail(
+    phases: List<String>,
+    ungroupedCount: Int?,
+    agents: List<WorkflowAgentEntity>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+) {
+    Column(Modifier.width(108.dp).fillMaxHeight().padding(vertical = 8.dp)) {
+        Text(
+            text = "PHASES",
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.padding(start = 12.dp, bottom = 6.dp),
+        )
+        if (phases.isEmpty() && ungroupedCount == null) {
+            RailItem(index = 0, title = "全部", count = agents.size, active = true, onClick = { onSelect(null) })
+            return@Column
+        }
+        phases.forEachIndexed { index, name ->
+            RailItem(
+                index = index + 1,
+                title = name,
+                count = agents.count { it.phase == name },
+                active = name == selected,
+                onClick = { onSelect(name) },
+            )
+        }
+        if (ungroupedCount != null && phases.isNotEmpty()) {
+            RailItem(
+                index = phases.size + 1,
+                title = "未分组",
+                count = ungroupedCount,
+                active = false,
+                onClick = { onSelect(null) },
+                enabled = false,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RailItem(
+    index: Int,
+    title: String,
+    count: Int,
+    active: Boolean,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp, vertical = 1.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (active) accent.copy(alpha = 0.14f) else Color_Transparent)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = index.toString(),
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+            color = if (active) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = count.toString() + " agents",
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AgentList(
+    agents: List<WorkflowAgentEntity>,
+    modifier: Modifier = Modifier,
+    onOpen: (WorkflowAgentEntity) -> Unit,
+) {
+    if (agents.isEmpty()) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                "这一阶段还没有 agent",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 6.dp),
+    ) {
+        items(agents, key = { it.callIndex }) { agent ->
+            AgentRow(agent) { onOpen(agent) }
+        }
+    }
+}
+
+@Composable
+private fun AgentRow(agent: WorkflowAgentEntity, onClick: () -> Unit) {
+    val accent = statusColor(agent.status, agent.reused)
+    val openable = agent.sessionId != null
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = openable, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        StatusDot(agent.status, reused = agent.reused, size = 9)
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = agent.label ?: ("agent #" + agent.callIndex),
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = agentMetaLine(agent),
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (agent.reused) {
+            Text(
+                text = "复用",
+                style = MaterialTheme.typography.labelSmall,
+                color = accent,
+            )
+        }
+        agent.runtimeMs?.let {
+            Text(
+                text = formatDuration(it),
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun agentMetaLine(agent: WorkflowAgentEntity): String {
+    val parts = buildList {
+        agent.modelName?.takeIf { it.isNotBlank() }?.let { add(it) }
+        val tokens = agent.tokensIn + agent.tokensOut
+        if (tokens > 0) add(formatTokens(tokens) + " tok")
+        if (agent.steps > 0) add(agent.steps.toString() + " 轮")
+        agent.error?.takeIf { it.isNotBlank() }?.let { add(it.take(40)) }
+    }
+    return if (parts.isEmpty()) statusLabel(agent.status, agent.reused) else parts.joinToString("  ·  ")
+}
+
+private val Color_Transparent = androidx.compose.ui.graphics.Color.Transparent
+
+/** 从 phasesJson 里读回有序的 phase 名。 */
+private fun parseStringList(json: String?): List<String> {
+    if (json.isNullOrBlank()) return emptyList()
+    val array = runCatching { JsonInstant.parseToJsonElement(json) as? JsonArray }.getOrNull()
+        ?: return emptyList()
+    return array.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+}

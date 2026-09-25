@@ -92,6 +92,8 @@ class AgentRunner(
         var promptTokens = 0
         var completionTokens = 0
         var lastMessages: List<UIMessage> = emptyList()
+        // 完整对话已经写到第几条 —— 增量追加的游标, 免得同一条消息被反复写
+        var messagesWritten = 0
         // 预算闸: GenerationLoop 的 maxSteps 只约束**单次生成**内的循环步数,
         // 约束不了"整段运行"的总轮次。总预算必须在这里自己盯 —— 否则一个不停调用工具的
         // 子代理会无限跑下去, 烧光 token 也占着并发配额。
@@ -110,6 +112,14 @@ class AgentRunner(
             when (chunk) {
                 is GenerationChunk.Messages -> {
                     lastMessages = chunk.messages
+                    // 完整对话落盘（子会话 UI 要"从头到尾"地看, 而转录那条流是保尾部截断的）。
+                    // 只写新增的部分: lastMessages 是累积列表, 每个 chunk 都重发一遍全量。
+                    if (lastMessages.size > messagesWritten) {
+                        lastMessages.drop(messagesWritten).forEach { message ->
+                            transcripts.appendMessage(runId, JsonInstant.encodeToString(message))
+                        }
+                        messagesWritten = lastMessages.size
+                    }
                     steps = lastMessages.count { it.role == MessageRole.ASSISTANT }
                     toolCalls = lastMessages.sumOf { it.getTools().size }
                     lastMessages.asReversed().firstNotNullOfOrNull { it.usage }?.let { usage ->

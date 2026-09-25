@@ -48,8 +48,46 @@ class AgentTranscriptStore(
         }.getOrDefault(emptyList())
     }
 
+    // ---- 完整对话（子会话 UI 的数据来源）----
+
+    /**
+     * 与 [fileFor] **分开**一个文件存放完整消息。
+     *
+     * 原因: 转录那条流是**给人排查用的**, 超限就"保尾部"截断;
+     * 而子会话视图要的是**从头到尾的对话**, 截掉开头会让用户看到的会话缺一块。
+     * 两者的保留策略不同, 就不该挤在一个文件里。
+     */
+    fun messagesFileFor(runId: String): File = File(baseDir, runId + ".messages.jsonl")
+
+    /** 追加一条完整消息（一行一个 UIMessage 的 JSON）。 */
+    fun appendMessage(runId: String, messageJson: String) {
+        runCatching {
+            val file = messagesFileFor(runId)
+            file.parentFile?.mkdirs()
+            file.appendText(messageJson.trimEnd('\n') + "\n")
+        }
+    }
+
+    fun messageCount(runId: String): Int {
+        val file = messagesFileFor(runId)
+        if (!file.isFile) return 0
+        return runCatching { file.readLines().count { it.isNotBlank() } }.getOrDefault(0)
+    }
+
+    /** 读回完整对话（默认全读: 子会话是"要看全"的东西, 不是分页流）。 */
+    fun readMessages(runId: String, from: Int = 0, limit: Int = MAX_MESSAGES): List<String> {
+        val file = messagesFileFor(runId)
+        if (!file.isFile) return emptyList()
+        return runCatching {
+            file.useLines { seq ->
+                seq.filter { it.isNotBlank() }.drop(from.coerceAtLeast(0)).take(limit).toList()
+            }
+        }.getOrDefault(emptyList())
+    }
+
     fun delete(runId: String) {
         runCatching { fileFor(runId).delete() }
+        runCatching { messagesFileFor(runId).delete() }
     }
 
     private fun truncateTail(file: File) {
@@ -63,5 +101,13 @@ class AgentTranscriptStore(
     companion object {
         /** 单条转录上限: 超过就保尾部。 */
         const val MAX_BYTES = 2L * 1024 * 1024
+
+        /**
+         * 完整对话一次最多读多少条。
+         *
+         * 子代理本身有轮次预算（默认 20 轮）, 每轮最多产生"助手 + 若干工具结果"几条消息,
+         * 所以正常规模远小于这个数; 它只是防止某个跑飞的转录把 UI 拖死。
+         */
+        const val MAX_MESSAGES = 2000
     }
 }

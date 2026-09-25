@@ -47,7 +47,8 @@ class WorkflowRuntimeTest {
         onAgent: suspend (String, String?, String?) -> String? = { _, _, _ -> null },
         progress: WorkflowProgressSink? = null,
     ) = WorkflowRuntime(
-        agentHandler = WorkflowAgentHandler { prompt, schema, label -> onAgent(prompt, schema, label) },
+        // 契约升级成"一次调用"对象后, 测试仍只需要看提示词/schema/label 三样
+        agentHandler = WorkflowAgentHandler { call, _ -> onAgent(call.prompt, call.schemaJson, call.label) },
         progress = progress,
         // 诊断期用短超时: 故障时能快速拿到"卡在哪"的信息
         timeoutMillis = 3_000,

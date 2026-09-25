@@ -49,13 +49,15 @@ class WorkflowAgentInvoker(
      * 返回 null 的语义与上游一致: 被停止或不可恢复错误（脚本据此判断, 不当作异常）。
      */
     suspend fun run(
+        call: WorkflowAgentCall,
+        observer: WorkflowAgentObserver,
         conversationId: String?,
         assistantId: String?,
         cwd: String?,
         maxSteps: Int,
-        prompt: String,
-        label: String?,
     ): String? {
+        val prompt = call.prompt
+        val label = call.label
         val settings = settingsStore.settingsFlowRaw.first()
         val parentAssistant = settings.assistants.firstOrNull { it.id.toString() == assistantId }
             ?: settings.assistants.firstOrNull()
@@ -78,6 +80,11 @@ class WorkflowAgentInvoker(
         )
 
         val runId = Uuid.random().toString()
+        // 一有 runId 就报出去: UI 要用它去读**完整子会话**。
+        // 这一刻子系统里还什么都没有, 但 UI 会自己去轮询文件, 所以先给钥匙最重要。
+        observer.onSession(runId)
+        observer.onModel(model.id.toString(), model.displayName)
+
         var text: String? = null
         return runCatching {
             runner.run(
@@ -91,7 +98,16 @@ class WorkflowAgentInvoker(
                 cwd = cwd,
                 maxSteps = maxSteps,
             ).collect { event ->
-                if (event is AgentEvent.Finished) text = event.text
+                when (event) {
+                    is AgentEvent.Messages -> Unit
+                    is AgentEvent.Progress -> observer.onProgress(
+                        steps = event.steps,
+                        toolCalls = event.toolCalls,
+                        tokensIn = event.promptTokens,
+                        tokensOut = event.completionTokens,
+                    )
+                    is AgentEvent.Finished -> text = event.text
+                }
             }
             text
         }.getOrElse { error ->
