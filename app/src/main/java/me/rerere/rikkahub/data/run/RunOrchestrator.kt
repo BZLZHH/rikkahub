@@ -33,8 +33,18 @@ class RunOrchestrator(
     /** run 结束时回调（通知 / 唤醒会话等由上层接） */
     private val onRunFinished: (RunRecord) -> Unit = {},
 ) {
-    private val executors = ConcurrentHashMap<RunKind, RunExecutor>()
-    private val registries = ConcurrentHashMap<RunKind, RunRegistry>()
+    /**
+     * 执行体与账本用**延迟工厂**提供, 而不是在构造时注入实例。
+     *
+     * 原因: Koin 单例是懒加载的。若在构造函数里直接 get 执行体, 就会形成
+     * "编排器 ← 执行体 ← 编排器" 的循环, 且顺序敏感、容易静默漏注册
+     * （某个执行体没人注入就永远不会构造, 于是它的工具静默不可用）。
+     * 改成工厂后由 kind 首次使用时解析, 并缓存 —— 既无顺序依赖, 也不会漏。
+     */
+    private val executorFactories = ConcurrentHashMap<RunKind, () -> RunExecutor>()
+    private val registryFactories = ConcurrentHashMap<RunKind, () -> RunRegistry>()
+    private val resolvedExecutors = ConcurrentHashMap<RunKind, RunExecutor>()
+    private val resolvedRegistries = ConcurrentHashMap<RunKind, RunRegistry>()
     private val active = ConcurrentHashMap<String, ActiveRun>()
     private val generation = AtomicLong(0L)
 
@@ -43,10 +53,27 @@ class RunOrchestrator(
     /** 各执行体当前在跑的数量（UI 徽标 / 配额提示用）。 */
     val activeCounts: StateFlow<Map<RunKind, Int>> = _activeCounts.asStateFlow()
 
-    fun register(executor: RunExecutor, registry: RunRegistry) {
-        executors[executor.kind] = executor
-        registries[executor.kind] = registry
+    /** 注册一种执行体。工厂会被缓存, 因此同 kind 重复注册没有意义（后者覆盖前者）。 */
+    fun register(kind: RunKind, executor: () -> RunExecutor, registry: () -> RunRegistry) {
+        executorFactories[kind] = executor
+        registryFactories[kind] = registry
+        // 换实现时把缓存清掉, 避免拿到旧实例
+        resolvedExecutors.remove(kind)
+        resolvedRegistries.remove(kind)
     }
+
+    private fun executorOf(kind: RunKind): RunExecutor? =
+        resolvedExecutors[kind] ?: executorFactories[kind]?.let { factory ->
+            runCatching { factory() }.getOrNull()?.also { resolvedExecutors[kind] = it }
+        }
+
+    private fun registryOf(kind: RunKind): RunRegistry? =
+        resolvedRegistries[kind] ?: registryFactories[kind]?.let { factory ->
+            runCatching { factory() }.getOrNull()?.also { resolvedRegistries[kind] = it }
+        }
+
+    /** 已注册的 kind（reconcile 与 UI 用）。 */
+    fun registeredKinds(): Set<RunKind> = executorFactories.keys.toSet()
 
     fun isRunning(runId: String): Boolean = active.containsKey(runId)
 
@@ -64,9 +91,9 @@ class RunOrchestrator(
         (record.startedAt ?: System.currentTimeMillis()) + record.maxRuntimeMs
 
     suspend fun start(record: RunRecord): RunLaunchResult {
-        val executor = executors[record.kind]
+        val executor = executorOf(record.kind)
             ?: return RunLaunchResult.NotStarted("no executor registered for " + record.kind)
-        val registry = registries[record.kind]
+        val registry = registryOf(record.kind)
             ?: return RunLaunchResult.NotStarted("no registry registered for " + record.kind)
 
         if (!canStart(record.kind, record.workspaceId)) {
@@ -150,12 +177,14 @@ class RunOrchestrator(
         }
         // 句柄不在了: 记录可能还挂在 RUNNING（App 重启等）。交给执行体自查,
         // 能收掉进程树就收掉, 收不掉也要把状态收敛, 否则界面会永远停在"运行中"。
-        val registry = registries.values.firstOrNull { reg ->
-            runCatching { reg.listUnfinished().any { it.runId == runId } }.getOrDefault(false)
-        } ?: return false
+        val registry = registeredKinds()
+            .mapNotNull { registryOf(it) }
+            .firstOrNull { reg ->
+                runCatching { reg.listUnfinished().any { it.runId == runId } }.getOrDefault(false)
+            } ?: return false
         // 交给该执行体清理自己的遗留（它才认识自己的进程/协程）;
         // 没有执行体就退回"仅收敛状态"。
-        val executor = executors[registry.kind]
+        val executor = executorOf(registry.kind)
         return runCatching {
             if (executor != null) {
                 executor.reconcileRegistry(registry)
@@ -177,7 +206,7 @@ class RunOrchestrator(
         val handle = run?.handle
         if (handle != null) return handle.await(timeoutMillis)
         // 不在内存里: 只要账上已经不是"未结束", 就当作已结束
-        return registries.values.none { reg ->
+        return registeredKinds().mapNotNull { registryOf(it) }.none { reg ->
             runCatching { reg.listUnfinished().any { it.runId == runId } }.getOrDefault(false)
         }
     }
@@ -185,10 +214,11 @@ class RunOrchestrator(
     /** App 启动时: 让每种执行体清理自己的遗留。 */
     suspend fun reconcileOnStart(): Int {
         var total = 0
-        executors.values.forEach { executor ->
-            val registry = registries[executor.kind] ?: return@forEach
+        registeredKinds().forEach { kind ->
+            val executor = executorOf(kind) ?: return@forEach
+            val registry = registryOf(kind) ?: return@forEach
             total += runCatching { executor.reconcileRegistry(registry) }
-                .onFailure { Log.e(TAG, "reconcile failed for " + executor.kind, it) }
+                .onFailure { Log.e(TAG, "reconcile failed for " + kind, it) }
                 .getOrDefault(0)
         }
         return total

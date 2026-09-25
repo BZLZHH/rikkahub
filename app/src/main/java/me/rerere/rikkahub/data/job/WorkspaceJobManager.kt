@@ -56,8 +56,12 @@ class WorkspaceJobManager(
     private val runRegistry = ShellRunRegistry(dao)
 
     init {
-        // 把 shell 执行体接进编排层。注意这里传 this —— 本类就是 shell 执行体的实现载体。
-        orchestrator.register(ShellRunExecutor(this), runRegistry)
+        // 把 shell 执行体接进编排层（延迟工厂: 本类就是 shell 执行体的实现载体）。
+        orchestrator.register(
+            kind = RunKind.JOB,
+            executor = { ShellRunExecutor(this) },
+            registry = { runRegistry },
+        )
     }
 
     companion object {

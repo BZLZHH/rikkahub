@@ -18,6 +18,17 @@ import me.rerere.rikkahub.utils.JsonInstant
 
 private const val TAG = "AgentRunner"
 
+/**
+ * 子代理超出轮次预算。
+ *
+ * 单独一个异常类型是为了让上层能把它与"真实失败"区分开 —— 预算耗尽应当记
+ * TIMED_OUT（受资源上限限制）而不是 FAILED（做错了事）。
+ */
+class AgentBudgetExceededException(
+    val rounds: Int,
+    val maxRounds: Int,
+) : RuntimeException("agent budget exceeded: " + rounds + "/" + maxRounds)
+
 /** 子代理一次运行的产物流。 */
 sealed interface AgentEvent {
     /** 子代理的可见输出(累积后的完整消息列表)。 */
@@ -81,6 +92,11 @@ class AgentRunner(
         var promptTokens = 0
         var completionTokens = 0
         var lastMessages: List<UIMessage> = emptyList()
+        // 预算闸: GenerationLoop 的 maxSteps 只约束**单次生成**内的循环步数,
+        // 约束不了"整段运行"的总轮次。总预算必须在这里自己盯 —— 否则一个不停调用工具的
+        // 子代理会无限跑下去, 烧光 token 也占着并发配额。
+        var roundsWithTools = 0
+        var currentRoundToolCalls = 0
 
         generationLoop.generateText(
             settings = settings,
@@ -88,7 +104,8 @@ class AgentRunner(
             messages = listOf(UIMessage.user(prompt)),
             assistant = assistant,
             tools = tools,
-            maxSteps = maxSteps,
+            // 给 GenerationLoop 一个宽松的内部上限; **总预算由下面的预算闸盯**
+            maxSteps = maxSteps * 2,
             workspaceCwd = cwd,
         ).collect { chunk ->
             when (chunk) {
@@ -108,6 +125,22 @@ class AgentRunner(
                         put("tail", lastMessages.lastOrNull()?.toText()?.take(2_000) ?: "")
                     })
                     emit(AgentEvent.Messages(lastMessages))
+                    // 只统计"带工具调用的助手回合": 一次生成内部的多次 chunk 不算新轮次
+                    val lastAssistant = lastMessages.lastOrNull { it.role == MessageRole.ASSISTANT }
+                    if (lastAssistant != null && lastAssistant.getTools().isNotEmpty()) {
+                        currentRoundToolCalls = lastAssistant.getTools().size
+                    } else if (lastAssistant != null && currentRoundToolCalls > 0) {
+                        // 上一轮的工具已经执行完, 模型给出了新回复 -> 计一轮完成
+                        roundsWithTools++
+                        currentRoundToolCalls = 0
+                        if (roundsWithTools >= maxSteps) {
+                            writeTranscript(runId, "budget", buildJsonObject {
+                                put("rounds", roundsWithTools)
+                                put("maxSteps", maxSteps)
+                            })
+                            throw AgentBudgetExceededException(roundsWithTools, maxSteps)
+                        }
+                    }
                 }
             }
         }

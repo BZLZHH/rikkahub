@@ -93,6 +93,46 @@ val appModule = module {
         )
     }
 
+    // ---- 子代理（与 shell 后台任务平级的另一种执行体）----
+    single {
+        me.rerere.rikkahub.data.agent.AgentTranscriptStore(
+            baseDir = java.io.File(get<android.content.Context>().filesDir, "agent-runs"),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.data.agent.AgentRunner(
+            generationLoop = get(),
+            transcripts = get(),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.data.agent.AgentToolFactory(
+            chatToolFactory = get(),
+        )
+    }
+
+    // 注册进编排层: 至此 JOB 与 AGENT 两种执行体都挂在同一套配额/看门狗/取消收尾之下。
+    // 用延迟工厂注册 —— 不依赖"谁先被构造", 也不怕没人注入（懒加载的单例不会被创建）。
+    single(createdAtStart = true) {
+        get<RunOrchestrator>().register(
+            kind = me.rerere.rikkahub.data.run.RunKind.AGENT,
+            executor = {
+                me.rerere.rikkahub.data.agent.AgentRunExecutor(
+                    scope = get(),
+                    dao = get(),
+                    runner = get(),
+                    toolFactory = get(),
+                    settingsStore = get(),
+                    workspaceRepository = get(),
+                    transcripts = get(),
+                )
+            },
+            registry = { me.rerere.rikkahub.data.agent.AgentRunRegistry(get()) },
+        )
+    }
+
     // 后台任务: job_* 工具、UI、调度器共用的唯一入口
     single {
         WorkspaceJobManager(
