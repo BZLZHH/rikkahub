@@ -24,6 +24,9 @@ interface RunRegistry {
     /** 列出所有"账上还在跑"的 run（App 被杀后用来收敛）。 */
     suspend fun listUnfinished(): List<RunRecord>
 
+    /** 读某个 run 的当前状态; 不存在返回 null。 */
+    suspend fun statusOf(runId: String): RunStatus?
+
     /**
      * 启动时清理遗留。
      *

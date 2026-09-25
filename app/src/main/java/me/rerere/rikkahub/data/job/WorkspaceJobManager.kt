@@ -338,7 +338,7 @@ class WorkspaceJobManager(
         val started = launchProcess(job, workspace, command, env)
         // 记账要在**起好之后**: RunRecord 直接取真实实体的状态与起始时间, 不靠假设。
         // 若起进程就失败了, launchProcess 已把 FAILED 落库, 这里 attach 到的也是真实结果。
-        orchestrator.attachExisting(started.toRunRecord()) { handleFor(started.id) }
+        orchestrator.attachExisting(started.toRunRecord(), runRegistry) { handleFor(started.id) }
         return started
     }
 

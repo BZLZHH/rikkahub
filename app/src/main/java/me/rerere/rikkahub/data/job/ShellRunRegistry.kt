@@ -78,6 +78,9 @@ class ShellRunRegistry(
     override suspend fun listUnfinished(): List<RunRecord> =
         dao.listRunningJobs().map { it.toRunRecord() }
 
+    override suspend fun statusOf(runId: String): RunStatus? =
+        dao.getJob(runId)?.let { RunStatus.from(it.status) }
+
     override suspend fun reconcile(): Int {
         val pending = dao.listRunningJobs()
         if (pending.isEmpty()) return 0

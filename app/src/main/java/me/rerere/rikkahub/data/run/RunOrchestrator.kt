@@ -109,21 +109,29 @@ class RunOrchestrator(
      * 用于调用方必须先起进程、再拿句柄的场景（shell 任务要先拿到真实 pid 才能落库）。
      * 配额**不在这里判** —— 调用方负责在最外层判过, 这里只做记账与看护。
      */
-    fun attachExisting(record: RunRecord, handleProvider: () -> RunHandle?): RunHandle? {
+    fun attachExisting(
+        record: RunRecord,
+        registry: RunRegistry,
+        handleProvider: () -> RunHandle?,
+    ): RunHandle? {
         val handle = handleProvider() ?: return null
         val run = ActiveRun(record = record, generation = generation.incrementAndGet())
         run.handle = handle
         active[record.runId] = run
         bumpCounts()
-        // 看护: 等句柄结束即可（状态持久化仍由执行体自己那套完成, 这里只做统计与回调）
+        // 看护: 等句柄结束。状态的持久化仍由执行体那套负责（shell 的收尾逻辑要写 exit_code
+        // 与日志大小, 不该由编排层代劳）; 这里只做计数与回调。
         scope.launch {
             handle.await(record.maxRuntimeMs)
             val current = active[record.runId]
-            if (current != null && current.generation == run.generation) {
-                active.remove(record.runId)
-                bumpCounts()
-                runCatching { onRunFinished(record.copy(status = RunStatus.SUCCEEDED)) }
-            }
+            if (current == null || current.generation != run.generation) return@launch
+            active.remove(record.runId)
+            bumpCounts()
+            // 回调要带**真实**结果: 直接问账本, 不要假设成功 ——
+            // 否则失败/被杀的任务会向通知与唤醒谎报 SUCCEEDED。
+            val finalStatus = runCatching { registry.statusOf(record.runId) }.getOrNull()
+                ?: RunStatus.SUCCEEDED
+            runCatching { onRunFinished(record.copy(status = finalStatus)) }
         }
         return handle
     }

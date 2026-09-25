@@ -76,6 +76,9 @@ class AgentRunRegistry(
     override suspend fun listUnfinished(): List<RunRecord> =
         dao.listRunning().map { it.toRunRecord() }
 
+    override suspend fun statusOf(runId: String): RunStatus? =
+        dao.getById(runId)?.let { RunStatus.from(it.status) }
+
     override suspend fun reconcile(): Int {
         val pending = dao.listRunning()
         if (pending.isEmpty()) return 0
