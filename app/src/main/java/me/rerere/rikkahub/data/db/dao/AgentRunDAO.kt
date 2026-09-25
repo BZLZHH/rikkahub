@@ -22,6 +22,9 @@ interface AgentRunDAO {
     @Query("SELECT * FROM agent_runs ORDER BY created_at DESC LIMIT :limit")
     fun listRecentFlow(limit: Int = 200): Flow<List<AgentRunEntity>>
 
+    @Query("SELECT * FROM agent_runs ORDER BY created_at DESC LIMIT :limit")
+    suspend fun listRecent(limit: Int = 200): List<AgentRunEntity>
+
     @Query("SELECT * FROM agent_runs WHERE status = 'RUNNING'")
     suspend fun listRunning(): List<AgentRunEntity>
 

@@ -199,6 +199,9 @@ val appModule = module {
             jobManager = get(),
             scheduleEngine = get(),
             jobDao = get(),
+            agentRunDao = get(),
+            agentTranscripts = get(),
+            runOrchestrator = get(),
         )
     }
 

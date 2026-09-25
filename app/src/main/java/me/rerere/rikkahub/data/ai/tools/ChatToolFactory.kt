@@ -40,6 +40,10 @@ class ChatToolFactory(
     private val jobManager: WorkspaceJobManager,
     private val scheduleEngine: JobScheduleEngine,
     private val jobDao: WorkspaceJobDAO,
+    /** 子代理的账本与转录; 与 job 分表, 但共用同一套编排层 */
+    private val agentRunDao: me.rerere.rikkahub.data.db.dao.AgentRunDAO,
+    private val agentTranscripts: me.rerere.rikkahub.data.agent.AgentTranscriptStore,
+    private val runOrchestrator: me.rerere.rikkahub.data.run.RunOrchestrator,
 ) {
     suspend fun createTools(
         settings: Settings,
@@ -134,6 +138,15 @@ class ChatToolFactory(
                 manager = jobManager,
                 scheduleEngine = scheduleEngine,
                 dao = jobDao,
+            ),
+            // 子代理: 与 shell 后台任务平级的另一种执行体, 共用同一套编排层
+            subagentContext = SubagentToolContext(
+                workspaceId = workspaceId,
+                conversationId = conversationId,
+                assistantId = assistantId,
+                dao = agentRunDao,
+                transcripts = agentTranscripts,
+                orchestrator = runOrchestrator,
             ),
         )
     }
