@@ -78,29 +78,37 @@ class WorkflowScriptStore(
         }
     }
 
-    /** 校验并返回合法的名字; 不合法直接抛（调用方会把它变成结构化错误）。 */
-    fun requireValidName(name: String): String {
-        val trimmed = name.trim()
-        require(trimmed.isNotEmpty()) { "workflow name is required" }
-        require(trimmed.length <= MAX_NAME_LENGTH) {
-            "workflow name is too long (max " + MAX_NAME_LENGTH + ")"
-        }
-        require(VALID_NAME.matches(trimmed)) {
-            "invalid workflow name: " + trimmed +
-                " (allowed: letters, digits, dot, dash, underscore; must not start with a dot)"
-        }
-        return trimmed
-    }
-
-    fun pathOf(name: String): String = DIR + "/" + requireValidName(name) + EXTENSION
-
     companion object {
         /** 工作区文件区里的约定目录。放在这里是为了让用户能一眼找到自己的脚本。 */
         const val DIR = "/workspace/.rhe/workflows"
         const val EXTENSION = ".js"
         const val MAX_NAME_LENGTH = 64
 
-        /** 白名单: 首字符为字母或数字, 其余允许点/横/下划线。点开头被排除, 免得出现隐藏文件与 .. 之类。 */
+        /**
+         * 白名单: 首字符为字母或数字, 其余允许点/横/下划线。
+         * 点开头被排除, 免得出现隐藏文件与 .. 之类。
+         */
         private val VALID_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]*")
+
+        /**
+         * 校验并返回合法的名字; 不合法直接抛（调用方会把它变成结构化错误）。
+         *
+         * 放在伴生对象里是因为它是**纯函数**, 而且是整个脚本存储的安全边界:
+         * 名字随后会被直接拼进 shell 命令, 所以"只允许白名单字符"这件事必须能单独测。
+         */
+        fun requireValidName(name: String): String {
+            val trimmed = name.trim()
+            require(trimmed.isNotEmpty()) { "workflow name is required" }
+            require(trimmed.length <= MAX_NAME_LENGTH) {
+                "workflow name is too long (max " + MAX_NAME_LENGTH + ")"
+            }
+            require(VALID_NAME.matches(trimmed)) {
+                "invalid workflow name: " + trimmed +
+                    " (allowed: letters, digits, dot, dash, underscore; must not start with a dot)"
+            }
+            return trimmed
+        }
+
+        fun pathOf(name: String): String = DIR + "/" + requireValidName(name) + EXTENSION
     }
 }

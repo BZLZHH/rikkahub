@@ -127,8 +127,24 @@ object WorkflowStructuredOutput {
         append(schemaJson)
     }
 
-    private fun parse(text: String): JsonElement? =
-        runCatching { JsonInstant.parseToJsonElement(text) }.getOrNull()
+    /**
+     * 解析一小段文本 —— 但**先按 JSON 的起始字符挡一道**。
+     *
+     * 原因: JsonInstant 是宽松模式（isLenient）, 它会把 "我不知道" 这种大白话也解析成一个
+     * 字符串字面量。那样"模型到底给没给 JSON"就再也判不出来了 —— 一段散文会被当成合法输出,
+     * 而 JSON Schema 意义上的字符串**必须带引号**。所以先看首字符是不是 JSON 值的合法开头。
+     */
+    private fun parse(text: String): JsonElement? {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return null
+        if (!isJsonStart(trimmed.first())) return null
+        return runCatching { JsonInstant.parseToJsonElement(trimmed) }.getOrNull()
+    }
+
+    /** { [ " 与数字/- 开头, 以及 true / false / null 的首字母。 */
+    private fun isJsonStart(ch: Char): Boolean =
+        ch == '{' || ch == '[' || ch == '"' || ch == '-' || ch.isDigit() ||
+            ch == 't' || ch == 'f' || ch == 'n'
 
     private fun stringList(element: JsonElement?): List<String> = when (element) {
         is JsonPrimitive -> listOfNotNull(element.contentOrNull)

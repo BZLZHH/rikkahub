@@ -26,7 +26,7 @@ class AgentToolPolicyTest {
         "get_time_info", "clipboard_tool", "eval_javascript", "text_to_speech",
         "memory_tool", "conversation_search", "recent_chats", "use_skill",
         "ask_user",
-        "subagent_start", "subagent_kill", "workflow_run", "workflow_create",
+        "subagent_start", "subagent_kill", "workflow_run", "workflow_status", "workflow_kill",
         "some_unknown_tool", "mcp__server__tool",
     ).map(::tool)
 

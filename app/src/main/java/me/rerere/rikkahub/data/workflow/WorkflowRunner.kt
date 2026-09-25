@@ -99,7 +99,7 @@ class WorkflowRunner(
             runCatching { scripts.save(request.workspaceId, request.saveAs, source) }
                 .getOrElse { return WorkflowStartResult.Rejected(describe(it)) }
         } else {
-            request.name?.takeIf { it.isNotBlank() }?.let { scripts.pathOf(it) }
+            request.name?.takeIf { it.isNotBlank() }?.let { WorkflowScriptStore.pathOf(it) }
         }
 
         val runId = Uuid.random().toString()
