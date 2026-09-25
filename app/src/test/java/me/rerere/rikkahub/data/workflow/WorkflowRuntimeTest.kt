@@ -35,7 +35,8 @@ class WorkflowRuntimeTest {
     ) = WorkflowRuntime(
         agentHandler = WorkflowAgentHandler { prompt, schema, label -> onAgent(prompt, schema, label) },
         progress = progress,
-        timeoutMillis = 10_000,
+        // 诊断期用短超时: 故障时能快速拿到"卡在哪"的信息
+        timeoutMillis = 3_000,
     )
 
     @Test

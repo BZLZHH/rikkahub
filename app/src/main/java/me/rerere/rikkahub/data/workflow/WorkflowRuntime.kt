@@ -106,17 +106,26 @@ class WorkflowRuntime(
      */
     private suspend fun com.dokar.quickjs.QuickJs.awaitDone(): String? {
         val deadline = System.currentTimeMillis() + timeoutMillis
+        var lastSeen: String? = null
         while (System.currentTimeMillis() < deadline) {
             val state = evaluate<String?>(READ_STATE)
             if (state != null) return state
+            // 每趟都留一份现场: 超时时能说清"卡在哪个状态", 而不是只报一句 timeout
+            lastSeen = evaluate<String?>(DIAGNOSE) ?: lastSeen
             delay(POLL_INTERVAL_MS)
         }
+        DIAGNOSTIC = lastSeen
         return null
     }
 
     private fun parseOutcome(outcome: String?): WorkflowExecutionResult {
         if (outcome == null) {
-            return WorkflowExecutionResult(false, null, "workflow timed out")
+            // 超时信息里带上现场: 只说 "timed out" 对排查毫无帮助
+            return WorkflowExecutionResult(
+                ok = false,
+                resultJson = null,
+                error = "workflow timed out; last state = " + (DIAGNOSTIC ?: "<never read>"),
+            )
         }
         val obj = runCatching {
             JsonInstant.parseToJsonElement(outcome) as? JsonObject
@@ -157,9 +166,26 @@ class WorkflowRuntime(
         return lines.joinToString("\n")
     }
 
+    /** 超时诊断: 最后一次看到的状态（单元测试与真机排查都用它）。 */
+    @Volatile
+    var DIAGNOSTIC: String? = null
+        private set
+
     companion object {
         const val DEFAULT_TIMEOUT_MS = 60L * 60 * 1000
         const val POLL_INTERVAL_MS = 50L
+
+        /** 超时时用: 把三个 globalThis 标志原样报出来。 */
+        private val DIAGNOSE = listOf(
+            "JSON.stringify({",
+            "  done: globalThis.__rheDone,",
+            "  hasResult: globalThis.__rheResult !== undefined && globalThis.__rheResult !== null,",
+            "  result: globalThis.__rheResult === undefined ? \"<undef>\" : globalThis.__rheResult,",
+            "  error: globalThis.__rheError,",
+            "  args: typeof globalThis.args,",
+            "  agentType: typeof globalThis.agent",
+            "})",
+        ).joinToString("\n")
 
         /** 读回完成状态: 未完成返回 null, 完成返回一个带 hasResult/result/error 的 JSON 串。 */
         private val READ_STATE = listOf(
