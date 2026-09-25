@@ -7,6 +7,10 @@
   <string name="about_page_version">Version</string>
   <string name="about_page_website">Website</string>
   <string name="about_page_upstream">Upstream project</string>
+  <string name="about_page_build_on">Built on RikkaHub %1$s</string>
+  <string name="about_page_rhe_channel">RHE %1$s · enhanced fork</string>
+  <string name="about_page_rhe_version">RHE version</string>
+  <string name="about_page_upstream_baseline">Upstream baseline</string>
   <string name="add">Add</string>
   <string name="app_name">RikkaHub Enhanced</string>
   <string name="asr_button_content_description">Speech Recognition</string>

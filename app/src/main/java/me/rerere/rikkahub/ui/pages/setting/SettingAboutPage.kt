@@ -1,10 +1,12 @@
 package me.rerere.rikkahub.ui.pages.setting
 
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowUpDouble
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Earth
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Github
+import me.rerere.hugeicons.stroke.Rocket01
 import me.rerere.hugeicons.stroke.SmartPhone01
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -135,6 +137,22 @@ fun SettingAboutPage() {
                             text = stringResource(R.string.app_name),
                             style = MaterialTheme.typography.displaySmall,
                         )
+                        Text(
+                            text = stringResource(
+                                R.string.about_page_build_on,
+                                BuildConfig.UPSTREAM_VERSION_NAME,
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = stringResource(
+                                R.string.about_page_rhe_channel,
+                                BuildConfig.RHE_VERSION_NAME,
+                            ),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
                     }
                 }
 
@@ -152,6 +170,20 @@ fun SettingAboutPage() {
                                 Text("${BuildConfig.VERSION_NAME} / ${BuildConfig.VERSION_CODE}")
                             },
                             headlineContent = { Text(stringResource(R.string.about_page_version)) },
+                        )
+                        item(
+                            leadingContent = { Icon(HugeIcons.Rocket01, null) },
+                            supportingContent = {
+                                Text("${BuildConfig.RHE_VERSION_NAME} (build ${BuildConfig.VERSION_CODE})")
+                            },
+                            headlineContent = { Text(stringResource(R.string.about_page_rhe_version)) },
+                        )
+                        item(
+                            leadingContent = { Icon(HugeIcons.ArrowUpDouble, null) },
+                            supportingContent = {
+                                Text("RikkaHub ${BuildConfig.UPSTREAM_VERSION_NAME} (${BuildConfig.UPSTREAM_VERSION_CODE})")
+                            },
+                            headlineContent = { Text(stringResource(R.string.about_page_upstream_baseline)) },
                         )
                         item(
                             leadingContent = { Icon(HugeIcons.SmartPhone01, null) },

@@ -7,8 +7,12 @@
   <string name="about_page_version">版本</string>
   <string name="about_page_website">官网</string>
   <string name="about_page_upstream">上游项目</string>
+  <string name="about_page_build_on">基于 RikkaHub %1$s 构建</string>
+  <string name="about_page_rhe_channel">RHE %1$s · Enhanced 分支</string>
+  <string name="about_page_rhe_version">RHE 版本</string>
+  <string name="about_page_upstream_baseline">上游基线</string>
   <string name="add">添加</string>
-  <string name="app_name">RikkaHub 增强版</string>
+  <string name="app_name">RikkaHub Enhanced</string>
   <string name="asr_button_content_description">语音识别</string>
   <string name="asr_button_stop">停止</string>
   <string name="assistant_detail_basic_desc">配置名称、头像、模型和参数</string>
@@ -861,7 +865,9 @@
   <string name="setting_page_search_title">搜索服务</string>
   <string name="setting_page_share">分享</string>
   <string name="setting_page_share_desc">分享本APP给朋友</string>
-  <string name="setting_page_share_text">RikkaHub 增强版 — 基于 RikkaHub 的增强分支（开源安卓 AI 助手）\n\nhttps://github.com/BZLZHH/rikkahub</string>
+  <string name="setting_page_share_text">RikkaHub Enhanced — 基于上游 RikkaHub 的独立分支（开源安卓 AI 助手）
+
+https://github.com/BZLZHH/rikkahub</string>
   <string name="setting_page_sponsor_alert_confirm">捐赠</string>
   <string name="setting_page_sponsor_alert_desc">您已启动应用超过100次！如果您喜欢使用它，请考虑支持开发者。</string>
   <string name="setting_page_sponsor_alert_dismiss">暂不</string>
@@ -889,7 +895,7 @@
   <string name="setting_page_web_server_address_note_desc">局域网地址：使用设备 WiFi IP，同一网络中的其他设备可访问。移动数据网络下不可用。
 本地地址：使用 localhost，仅限本设备访问。
 mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过名称访问，无需知道 IP。</string>
-  <string name="setting_page_web_server_desc">允许你通过网页访问 RikkaHub 增强版</string>
+  <string name="setting_page_web_server_desc">允许你通过网页访问 RikkaHub Enhanced</string>
   <string name="setting_page_web_server_error">错误</string>
   <string name="setting_page_web_server_jwt_enable">启用身份验证</string>
   <string name="setting_page_web_server_jwt_enable_desc">访问网页界面时需要密码验证</string>
@@ -1386,15 +1392,15 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_display_page_background_effect_blur">模糊</string>
   <string name="setting_display_page_background_effect_glass">玻璃</string>
   <string name="setting_page_background_running">后台运行</string>
-  <string name="setting_page_background_running_desc">用常驻通知让 RikkaHub 增强版 在后台保持运行</string>
+  <string name="setting_page_background_running_desc">用常驻通知让 RikkaHub Enhanced 在后台保持运行</string>
   <string name="setting_background_running">后台运行</string>
   <string name="setting_background_running_switch_title">后台持续运行</string>
-  <string name="setting_background_running_switch_desc">显示一条静默的常驻通知，让 RikkaHub 增强版 在后台保持运行，退出应用后回复生成、通知和长任务也不会被打断。</string>
+  <string name="setting_background_running_switch_desc">显示一条静默的常驻通知，让 RikkaHub Enhanced 在后台保持运行，退出应用后回复生成、通知和长任务也不会被打断。</string>
   <string name="setting_background_running_status_title">运行状态</string>
   <string name="setting_background_running_status_running">运行中</string>
   <string name="setting_background_running_status_running_desc">常驻通知已显示。可用上方开关或通知里的「停止」结束。</string>
   <string name="setting_background_running_status_stopped">未运行</string>
-  <string name="setting_background_running_status_stopped_desc">打开上方开关即可让 RikkaHub 增强版 在后台保持运行。</string>
+  <string name="setting_background_running_status_stopped_desc">打开上方开关即可让 RikkaHub Enhanced 在后台保持运行。</string>
   <string name="setting_background_running_uptime_title">已运行</string>
   <string name="setting_background_running_uptime_minutes">%1$d 分钟</string>
   <string name="setting_background_running_uptime_hours">%1$d 小时 %2$d 分</string>
@@ -1406,10 +1412,10 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_background_running_check_notification_desc_granted">已授权，常驻通知可以正常显示。</string>
   <string name="setting_background_running_check_notification_desc_missing">Android 13 及以上需要该权限才能显示常驻通知。</string>
   <string name="setting_background_running_check_battery_title">忽略电池优化</string>
-  <string name="setting_background_running_check_battery_desc_granted">系统已允许 RikkaHub 增强版 在后台持续运行。</string>
-  <string name="setting_background_running_check_battery_desc_missing">省电策略可能冻结后台应用。请在系统列表里把 RikkaHub 增强版 设为「不限制」。</string>
+  <string name="setting_background_running_check_battery_desc_granted">系统已允许 RikkaHub Enhanced 在后台持续运行。</string>
+  <string name="setting_background_running_check_battery_desc_missing">省电策略可能冻结后台应用。请在系统列表里把 RikkaHub Enhanced 设为「不限制」。</string>
   <string name="setting_background_running_check_autostart_title">自启动与后台限制</string>
-  <string name="setting_background_running_check_autostart_desc">%1$s 可能限制后台应用。请允许 RikkaHub 增强版 自启动并解除后台限制。</string>
+  <string name="setting_background_running_check_autostart_desc">%1$s 可能限制后台应用。请允许 RikkaHub Enhanced 自启动并解除后台限制。</string>
   <string name="setting_background_running_about_title">关于常驻通知</string>
   <string name="setting_background_running_about_notification_title">为什么必须有一条常驻通知？</string>
   <string name="setting_background_running_about_notification_desc">Android 只允许持有前台服务的应用在后台继续工作，而前台服务必须显示通知。这条通知仅此作用。</string>
@@ -1420,7 +1426,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_background_running_done">已完成</string>
   <string name="setting_background_running_start_failed">后台常驻启动失败</string>
   <string name="notification_channel_background_keep_alive">后台运行</string>
-  <string name="notification_background_keep_alive_title">RikkaHub 增强版 正在后台运行</string>
+  <string name="notification_background_keep_alive_title">RikkaHub Enhanced 正在后台运行</string>
   <string name="notification_background_keep_alive_text">常驻通知已开启，点击返回应用。</string>
   <string name="notification_background_keep_alive_generating">正在生成 %1$d 个回复</string>
   <string name="notification_background_keep_alive_uptime">已运行 %1$s</string>
