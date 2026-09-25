@@ -95,8 +95,7 @@ class AgentRunner(
         // 预算闸: GenerationLoop 的 maxSteps 只约束**单次生成**内的循环步数,
         // 约束不了"整段运行"的总轮次。总预算必须在这里自己盯 —— 否则一个不停调用工具的
         // 子代理会无限跑下去, 烧光 token 也占着并发配额。
-        var roundsWithTools = 0
-        var currentRoundToolCalls = 0
+        val budget = AgentBudget(maxRounds = maxSteps)
 
         generationLoop.generateText(
             settings = settings,
@@ -125,21 +124,16 @@ class AgentRunner(
                         put("tail", lastMessages.lastOrNull()?.toText()?.take(2_000) ?: "")
                     })
                     emit(AgentEvent.Messages(lastMessages))
-                    // 只统计"带工具调用的助手回合": 一次生成内部的多次 chunk 不算新轮次
                     val lastAssistant = lastMessages.lastOrNull { it.role == MessageRole.ASSISTANT }
-                    if (lastAssistant != null && lastAssistant.getTools().isNotEmpty()) {
-                        currentRoundToolCalls = lastAssistant.getTools().size
-                    } else if (lastAssistant != null && currentRoundToolCalls > 0) {
-                        // 上一轮的工具已经执行完, 模型给出了新回复 -> 计一轮完成
-                        roundsWithTools++
-                        currentRoundToolCalls = 0
-                        if (roundsWithTools >= maxSteps) {
-                            writeTranscript(runId, "budget", buildJsonObject {
-                                put("rounds", roundsWithTools)
-                                put("maxSteps", maxSteps)
-                            })
-                            throw AgentBudgetExceededException(roundsWithTools, maxSteps)
-                        }
+                    val exceeded = budget.onAssistantMessage(
+                        lastAssistant?.let { it.getTools().isNotEmpty() },
+                    )
+                    if (exceeded) {
+                        writeTranscript(runId, "budget", buildJsonObject {
+                            put("rounds", budget.rounds)
+                            put("maxSteps", maxSteps)
+                        })
+                        throw AgentBudgetExceededException(budget.rounds, maxSteps)
                     }
                 }
             }
