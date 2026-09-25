@@ -52,7 +52,10 @@ import me.rerere.rikkahub.utils.JsonInstant
         WorkflowRunEntity::class,
         WorkflowAgentResultEntity::class,
     ],
-    version = 29,
+    // v29 这个版本号**被复用出过事故**: 早先那套被移除的实现也用过 v29,
+    // 装过它的设备上 user_version 已经是 29, 于是 Room 不跑迁移、直接比对 identity hash 并崩溃。
+    // 现在往上加一位到 30, 由 Migration_29_30 把真正的两张表补上（见该文件的注释）。
+    version = 30,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),

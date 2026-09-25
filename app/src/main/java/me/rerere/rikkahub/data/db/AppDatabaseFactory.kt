@@ -10,13 +10,19 @@ import me.rerere.rikkahub.data.db.migrations.Migration_11_12
 import me.rerere.rikkahub.data.db.migrations.Migration_13_14
 import me.rerere.rikkahub.data.db.migrations.Migration_14_15
 import me.rerere.rikkahub.data.db.migrations.Migration_15_16
+import me.rerere.rikkahub.data.db.migrations.Migration_29_30
 
 /** Shared schema, migrations and extensions for the app and staged backup validation. */
 internal object AppDatabaseFactory {
     fun create(context: Context, name: String = SQLiteConfiguration.DATABASE_NAME): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, name)
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16)
+            .addMigrations(
+                Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16,
+                // v29 -> v30: 版本号撞车的补救（装过"被移除那套实现"的设备 user_version 已经是 29,
+                // 不跑迁移就会直接比对 identity hash 并崩溃）。详见 Migration_29_30 的注释。
+                Migration_29_30,
+            )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     val dictDir = SimpleDictManager.extractDict(context)
