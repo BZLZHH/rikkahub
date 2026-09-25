@@ -10,14 +10,30 @@ import me.rerere.workspace.JobParamResolver
  * - `{{name}}`            工作流参数（声明式, 见 [WorkflowParam]）
  * - `{{steps.<id>.<key>}}` 前面步骤 export 出来的键
  * - `{{steps.<id>.exit_code}}` 步骤退出码（引擎自动导出, 不用声明）
- * - `|<ins>raw</ins>` 后缀      原样插入, 不做 shell 转义（进阶用法, 同 JobParamResolver）
+ * - `{{name|raw}}`         原样插入, 不做 shell 转义（进阶用法, 同 JobParamResolver; 允许 `| raw` 带空格）
  *
  * 转义规则与 [JobParamResolver] 保持一致（POSIX 单引号转义）, 因为最终都是往 shell 里拼;
  * 未声明的占位符**保持原样并记录**, 不静默吃掉 —— 静默替换成空值会让"变量名打错"变得极难排查。
  */
 object WorkflowVarResolver {
 
-    private val PLACEHOLDER = Regex("""\{\{\s*([A-Za-z0-9_.-]+)\s*(\|\s*raw)?\s*}}""")
+    /**
+     * 占位符匹配。
+     *
+     * 两个细节都是踩过的坑:
+     *
+     * 1. **结尾的 } 必须转义成 \}\}**。孤立未转义的 `}` 在桌面 JVM 的 java.util.regex 里是容忍的,
+     *    但 Android 的 Pattern 走 com.android.icu, 严格解析会抛 PatternSyntaxException。
+     * 2. **用 by lazy 而不是直接初始化**。原先它是 object 的静态字段, 正则一非法就在 <clinit> 里抛异常,
+     *    于是整个类此后永远加载失败 —— 第一次报 ExceptionInInitializerError, 之后每次调用都变成
+     *    NoClassDefFoundError, 连不涉及变量的流程都跑不起来。改成 lazy 后单个调用失败, 不会毁掉整个类。
+     *
+     * 注意: JVM 单元测试**覆盖不到**第 1 条 —— 桌面的正则引擎本来就接受那种写法,
+     * 所以"单测全绿"曾经和"真机必崩"同时成立。这类差异只能靠真机验证。
+     */
+    private val PLACEHOLDER: Regex by lazy {
+        Regex("""\{\{\s*([A-Za-z0-9_.-]+)\s*(\|\s*raw)?\s*\}\}""")
+    }
 
     data class Result(
         val text: String,
@@ -45,7 +61,13 @@ object WorkflowVarResolver {
         stepOutputs: Map<String, Map<String, String>>,
     ): Result {
         val unresolved = mutableListOf<String>()
-        val rendered = PLACEHOLDER.replace(text) { match ->
+        // 兜底: 正则若在某运行时上无法编译（真机上确实发生过一次）, 这里退化为
+        // "一个变量都没解析" 并把整段文本原样交给上层去报错 ——
+        // 而不是让异常冒出去把整条流程打断。宁可"流程明确失败在变量上",
+        // 也不要"流程莫名其妙跑不起来"。
+        val pattern = runCatching { PLACEHOLDER }.getOrNull()
+            ?: return Result(text, listOf("<placeholder pattern unavailable>"))
+        val rendered = pattern.replace(text) { match ->
             val name = match.groupValues[1]
             val raw = match.groupValues[2].isNotBlank()
             val value = lookup(name, params, stepOutputs)

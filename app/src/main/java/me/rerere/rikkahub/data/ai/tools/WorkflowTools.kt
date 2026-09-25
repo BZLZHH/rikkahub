@@ -59,7 +59,8 @@ private fun workflowCreateTool(ctx: WorkflowToolContext, needsApproval: (String)
         append("Steps run in order; each step is a shell command executed as its own background job. ")
         append("Steps pass data through files: the engine injects RIKKA_OUT for each step and exposes ")
         append("the keys named in export.keys to later steps as {{steps.<id>.<key>}}; the exit code is ")
-        append("always available as {{steps.<id>.exit_code}}. Workflow params use {{name}}. ")
+        append("always available as {{steps.<id>.exit_code}}. Workflow params use {{name}}; add a |raw ")
+        append("suffix ({{name|raw}}) to insert a value without shell quoting. ")
         append("on_error=fail stops the run (later steps become skipped); retries=N retries that step.")
     },
     parameters = {
