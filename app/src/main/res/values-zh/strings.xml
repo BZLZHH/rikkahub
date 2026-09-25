@@ -8,7 +8,7 @@
   <string name="about_page_website">官网</string>
   <string name="about_page_upstream">上游项目</string>
   <string name="about_page_build_on">基于 RikkaHub %1$s 构建</string>
-  <string name="about_page_rhe_channel">RHE %1$s · Enhanced 分支</string>
+  <string name="about_page_rhe_channel">Enhanced %1$s（build %2$s）</string>
   <string name="about_page_rhe_version">RHE 版本</string>
   <string name="about_page_upstream_baseline">上游基线</string>
   <string name="add">添加</string>

@@ -149,6 +149,7 @@ fun SettingAboutPage() {
                             text = stringResource(
                                 R.string.about_page_rhe_channel,
                                 BuildConfig.RHE_VERSION_NAME,
+                                BuildConfig.VERSION_CODE,
                             ),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
