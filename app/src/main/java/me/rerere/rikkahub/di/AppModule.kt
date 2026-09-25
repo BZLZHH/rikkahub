@@ -46,6 +46,9 @@ val appModule = module {
         )
     }
 
+    // 注意: 这里**必须**按具体类型 AppScope 注册。其它组件(如 ChatNotificationManager、
+    // UpdateChecker)注入的是 AppScope 本身; 若改成 single<CoroutineScope>, 它们就解析不到了。
+    // 因此需要协程作用域的组件请直接依赖 AppScope, 不要依赖 CoroutineScope 抽象。
     single {
         AppScope()
     }

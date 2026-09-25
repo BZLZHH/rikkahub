@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.data.run
 
 import android.util.Log
-import kotlinx.coroutines.CoroutineScope
+import me.rerere.rikkahub.AppScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,7 +23,11 @@ private const val TAG = "RunOrchestrator"
  * 子代理的"停模型循环"在 AgentRunExecutor 里。
  */
 class RunOrchestrator(
-    private val scope: CoroutineScope,
+    /**
+     * 依赖具体类型 [AppScope] 而不是 CoroutineScope 抽象 —— DI 里 AppScope 是单类型注册的,
+     * 用抽象去 get() 会解析不到(真机启动崩溃过一次, 别改成 CoroutineScope)。
+     */
+    private val scope: AppScope,
     /** 读取用户配置的配额; 每次调用都重新读, 所以设置改完立刻生效。 */
     private val quotaReader: suspend () -> RunQuotaConfig,
     /** run 结束时回调（通知 / 唤醒会话等由上层接） */
