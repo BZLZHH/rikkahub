@@ -38,6 +38,7 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.LEARNING_MODE_PROMPT
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
+import me.rerere.rikkahub.data.run.RunQuota
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
 import me.rerere.rikkahub.data.model.Assistant
@@ -178,6 +179,12 @@ class SettingsStore(
         // 后台常驻（常驻通知）
         val BACKGROUND_RUNNING_ENABLED = booleanPreferencesKey("background_running_enabled")
 
+        // 后台执行并发配额（用户可调）: shell 任务与子代理分账, 互不挤占
+        val MAX_CONCURRENT_JOBS = intPreferencesKey("max_concurrent_jobs")
+        val MAX_CONCURRENT_JOBS_PER_WORKSPACE = intPreferencesKey("max_concurrent_jobs_per_workspace")
+        val MAX_CONCURRENT_AGENTS = intPreferencesKey("max_concurrent_agents")
+        val MAX_CONCURRENT_AGENTS_PER_WORKSPACE = intPreferencesKey("max_concurrent_agents_per_workspace")
+
         // 提示词注入
         val MODE_INJECTIONS = stringPreferencesKey("mode_injections")
         val LOREBOOKS = stringPreferencesKey("lorebooks")
@@ -254,6 +261,10 @@ class SettingsStore(
                 preferences[WEB_SERVER_ACCESS_PASSWORD] = settings.webServerAccessPassword
                 preferences[WEB_SERVER_LOCALHOST_ONLY] = settings.webServerLocalhostOnly
                 preferences[BACKGROUND_RUNNING_ENABLED] = settings.backgroundRunningEnabled
+                preferences[MAX_CONCURRENT_JOBS] = settings.maxConcurrentJobs
+                preferences[MAX_CONCURRENT_JOBS_PER_WORKSPACE] = settings.maxConcurrentJobsPerWorkspace
+                preferences[MAX_CONCURRENT_AGENTS] = settings.maxConcurrentAgents
+                preferences[MAX_CONCURRENT_AGENTS_PER_WORKSPACE] = settings.maxConcurrentAgentsPerWorkspace
                 preferences[AUTO_APPROVAL_ENABLED] = settings.autoApprovalEnabled
                 preferences[AUTO_APPROVAL_ACTION_TOOLS_ONLY] = settings.autoApprovalActionToolsOnly
                 settings.autoApprovalModelId?.let {
@@ -358,6 +369,12 @@ class SettingsStore(
                 webServerAccessPassword = preferences[WEB_SERVER_ACCESS_PASSWORD] ?: "",
                 webServerLocalhostOnly = preferences[WEB_SERVER_LOCALHOST_ONLY] == true,
                 backgroundRunningEnabled = preferences[BACKGROUND_RUNNING_ENABLED] == true,
+                maxConcurrentJobs = preferences[MAX_CONCURRENT_JOBS] ?: RunQuota.DEFAULT_MAX_CONCURRENT_JOBS,
+                maxConcurrentJobsPerWorkspace = preferences[MAX_CONCURRENT_JOBS_PER_WORKSPACE]
+                    ?: RunQuota.DEFAULT_MAX_CONCURRENT_JOBS_PER_WORKSPACE,
+                maxConcurrentAgents = preferences[MAX_CONCURRENT_AGENTS] ?: RunQuota.DEFAULT_MAX_CONCURRENT_AGENTS,
+                maxConcurrentAgentsPerWorkspace = preferences[MAX_CONCURRENT_AGENTS_PER_WORKSPACE]
+                    ?: RunQuota.DEFAULT_MAX_CONCURRENT_AGENTS_PER_WORKSPACE,
                 autoApprovalEnabled = preferences[AUTO_APPROVAL_ENABLED] == true,
                 autoApprovalModelId = preferences[AUTO_APPROVAL_MODEL]?.let { Uuid.parse(it) },
                 autoApprovalActionToolsOnly = preferences[AUTO_APPROVAL_ACTION_TOOLS_ONLY] != false,
@@ -626,6 +643,14 @@ data class Settings(
     val webServerLocalhostOnly: Boolean = false,
     /** 是否开启「后台持续运行」（常驻通知 + 前台服务保活）。 */
     val backgroundRunningEnabled: Boolean = false,
+    /** 并发上限: shell 后台任务(全局)。 */
+    val maxConcurrentJobs: Int = RunQuota.DEFAULT_MAX_CONCURRENT_JOBS,
+    /** 并发上限: shell 后台任务(每 workspace)。 */
+    val maxConcurrentJobsPerWorkspace: Int = RunQuota.DEFAULT_MAX_CONCURRENT_JOBS_PER_WORKSPACE,
+    /** 并发上限: 子代理(全局)。 */
+    val maxConcurrentAgents: Int = RunQuota.DEFAULT_MAX_CONCURRENT_AGENTS,
+    /** 并发上限: 子代理(每 workspace)。 */
+    val maxConcurrentAgentsPerWorkspace: Int = RunQuota.DEFAULT_MAX_CONCURRENT_AGENTS_PER_WORKSPACE,
     /** 自动审批: 需要审批的工具调用先交给 [autoApprovalModelId] 判断, 通过则跳过人工确认。 */
     val autoApprovalEnabled: Boolean = false,
     /** 审批模型; null 表示使用"快速模型" */

@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.job
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import me.rerere.rikkahub.data.db.entity.WorkspaceJobDefEntity
+import me.rerere.rikkahub.data.run.RunStatus
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.workspace.JobParamDef
 
@@ -19,24 +20,13 @@ enum class WorkspaceJobMode {
     }
 }
 
-enum class WorkspaceJobStatus {
-    PENDING,
-    RUNNING,
-    SUCCEEDED,
-    FAILED,
-    KILLED,
-    TIMED_OUT,
-    INTERRUPTED,
-    DEFERRED;
-
-    val isFinished: Boolean
-        get() = this != PENDING && this != RUNNING && this != DEFERRED
-
-    companion object {
-        fun from(value: String?): WorkspaceJobStatus =
-            entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: PENDING
-    }
-}
+/**
+ * 后台执行的状态。
+ *
+ * 已经搬到 [me.rerere.rikkahub.data.run.RunStatus] —— 它对 shell 任务与子代理同样成立,
+ * 不该住在 `job` 包里。这里保留旧名以免改动大量既有调用点。
+ */
+typealias WorkspaceJobStatus = RunStatus
 
 enum class JobTriggerSource { AI, USER, SCHEDULE, RESTART }
 
