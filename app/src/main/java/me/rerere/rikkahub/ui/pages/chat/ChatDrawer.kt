@@ -6,6 +6,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -98,6 +100,7 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChatDrawerContent(
     navController: Navigator,
@@ -329,9 +332,11 @@ fun ChatDrawerContent(
                 }
             )
 
-            Row(
-                horizontalArrangement = Arrangement.SpaceAround,
-                verticalAlignment = Alignment.CenterVertically,
+            // 按钮会随功能增加而变多, 用 FlowRow 自动换行, 避免挤在固定的一行里溢出
+            FlowRow(
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                maxItemsInEachRow = 4,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp)

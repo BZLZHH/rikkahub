@@ -3,6 +3,7 @@ package me.rerere.rikkahub.utils
 import android.app.DownloadManager
 import android.content.Context
 import android.os.Environment
+import android.util.Log
 import android.widget.Toast
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +23,16 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 // 本 fork 的更新来源: 自己的 GitHub Release（不再查上游的更新服务, 那包装不上）
+private const val TAG = "UpdateChecker"
 private const val API_URL = "https://api.github.com/repos/BZLZHH/rikkahub/releases/latest"
+
+/** "没有可用更新"的占位: 版本号 0.0.0 永远小于当前版本, UI 不会渲染更新卡片 */
+private val EMPTY_UPDATE = UpdateInfo(
+    version = "0.0.0",
+    publishedAt = "",
+    changelog = "",
+    downloads = emptyList(),
+)
 private const val RELEASES_PAGE = "https://github.com/BZLZHH/rikkahub/releases"
 
 class UpdateChecker(
@@ -53,19 +63,30 @@ class UpdateChecker(
                             )
                             .build()
                     ).await()
-                    if (response.isSuccessful) {
-                        val release = json.decodeFromString<GitHubRelease>(response.body.string())
-                        release.toUpdateInfo()
-                    } else {
-                        throw Exception("Failed to fetch update info (${response.code})")
+                    when {
+                        response.isSuccessful -> {
+                            val release = json.decodeFromString<GitHubRelease>(response.body.string())
+                            release.toUpdateInfo()
+                        }
+
+                        // 本 fork 还没发布过 Release: 视为"已是最新", 不弹错误卡片
+                        response.code == 404 -> EMPTY_UPDATE
+
+                        else -> {
+                            Log.w(TAG, "update check: unexpected HTTP ${response.code}")
+                            EMPTY_UPDATE
+                        }
                     }
                 } catch (e: Exception) {
-                    throw Exception("Failed to fetch update info", e)
+                    // 网络不可达/被代理拦截/GitHub API 受限: 静默忽略, 不弹"检查更新失败"卡片
+                    Log.w(TAG, "update check failed (ignored)", e)
+                    EMPTY_UPDATE
                 }
             )
         )
     }.catch {
-        emit(UiState.Error(it))
+        Log.w(TAG, "update check flow failed (ignored)", it)
+        emit(UiState.Success(EMPTY_UPDATE))
     }.flowOn(Dispatchers.IO)
 
     fun downloadUpdate(context: Context, download: UpdateDownload) {
