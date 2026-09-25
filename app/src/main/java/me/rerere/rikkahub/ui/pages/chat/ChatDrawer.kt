@@ -6,8 +6,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -58,7 +56,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChartColumn
-import me.rerere.hugeicons.stroke.Cpu
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.FolderAdd
@@ -76,7 +73,6 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.job.WorkspaceJobManager
 import me.rerere.rikkahub.data.model.Folder
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.ui.components.ai.AssistantPicker
@@ -100,7 +96,6 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChatDrawerContent(
     navController: Navigator,
@@ -139,10 +134,6 @@ fun ChatDrawerContent(
     val conversationJobs by vm.conversationJobs.collectAsStateWithLifecycle(
         initialValue = emptyMap(),
     )
-
-    // 后台任务运行数（侧边栏入口显示）
-    val jobManager: WorkspaceJobManager = koinInject()
-    val runningJobs by jobManager.runningCount.collectAsStateWithLifecycle()
 
     // 昵称编辑状态
     val nicknameEditState = useEditState<String> { newNickname ->
@@ -332,11 +323,9 @@ fun ChatDrawerContent(
                 }
             )
 
-            // 按钮会随功能增加而变多, 用 FlowRow 自动换行, 避免挤在固定的一行里溢出
-            FlowRow(
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                maxItemsInEachRow = 4,
+            Row(
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp)
@@ -400,24 +389,6 @@ fun ChatDrawerContent(
                     },
                     onClick = {
                         navController.navigate(Screen.Favorite)
-                    },
-                )
-
-                DrawerAction(
-                    icon = {
-                        Icon(HugeIcons.Cpu, stringResource(R.string.jobs_page_title))
-                    },
-                    label = {
-                        Text(
-                            if (runningJobs > 0) {
-                                stringResource(R.string.jobs_page_title) + " (" + runningJobs + ")"
-                            } else {
-                                stringResource(R.string.jobs_page_title)
-                            }
-                        )
-                    },
-                    onClick = {
-                        navController.navigate(Screen.Jobs())
                     },
                 )
 
