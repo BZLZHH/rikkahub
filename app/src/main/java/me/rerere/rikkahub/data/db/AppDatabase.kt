@@ -16,6 +16,7 @@ import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
 import me.rerere.rikkahub.data.db.dao.WorkspaceJobDAO
+import me.rerere.rikkahub.data.db.dao.WorkflowRunDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.FolderEntity
@@ -27,6 +28,8 @@ import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.db.entity.AgentRunEntity
 import me.rerere.rikkahub.data.db.entity.WorkspaceJobDefEntity
 import me.rerere.rikkahub.data.db.entity.WorkspaceJobEntity
+import me.rerere.rikkahub.data.db.entity.WorkflowAgentResultEntity
+import me.rerere.rikkahub.data.db.entity.WorkflowRunEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
@@ -45,8 +48,11 @@ import me.rerere.rikkahub.utils.JsonInstant
         WorkspaceJobEntity::class,
         WorkspaceJobDefEntity::class,
         AgentRunEntity::class,
+        // workflow: 运行账目 + 可恢复性存档（后者按「脚本指纹 + 调用序号」存每个 agent 的产出）
+        WorkflowRunEntity::class,
+        WorkflowAgentResultEntity::class,
     ],
-    version = 28,
+    version = 29,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -70,6 +76,8 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 25, to = 26),
         AutoMigration(from = 26, to = 27),
         AutoMigration(from = 27, to = 28),
+        // 只新增两张表, 没有改动既有列, 所以是纯粹的自动迁移
+        AutoMigration(from = 28, to = 29),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -93,6 +101,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun folderDao(): FolderDAO
 
     abstract fun agentRunDao(): AgentRunDAO
+
+    abstract fun workflowRunDao(): WorkflowRunDAO
 }
 
 object TokenUsageConverter {

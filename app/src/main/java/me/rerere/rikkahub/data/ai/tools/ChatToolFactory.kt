@@ -44,6 +44,10 @@ class ChatToolFactory(
     private val agentRunDao: me.rerere.rikkahub.data.db.dao.AgentRunDAO,
     private val agentTranscripts: me.rerere.rikkahub.data.agent.AgentTranscriptStore,
     private val runOrchestrator: me.rerere.rikkahub.data.run.RunOrchestrator,
+    /** workflow: 运行服务（脚本编排）/ 脚本落盘 / 运行账目 */
+    private val workflowRunner: me.rerere.rikkahub.data.workflow.WorkflowRunner,
+    private val workflowScriptStore: me.rerere.rikkahub.data.workflow.WorkflowScriptStore,
+    private val workflowRunDao: me.rerere.rikkahub.data.db.dao.WorkflowRunDAO,
 ) {
     suspend fun createTools(
         settings: Settings,
@@ -147,6 +151,16 @@ class ChatToolFactory(
                 dao = agentRunDao,
                 transcripts = agentTranscripts,
                 orchestrator = runOrchestrator,
+            ),
+            // workflow: 与 job_* / subagent_* 平级的第三种"起执行体"的能力,
+            // 区别是它起的是**一段代码**, 由脚本自己决定起多少个子代理。
+            workflowContext = WorkflowToolContext(
+                workspaceId = workspaceId,
+                conversationId = conversationId,
+                assistantId = assistantId,
+                dao = workflowRunDao,
+                runner = workflowRunner,
+                scripts = workflowScriptStore,
             ),
         )
     }

@@ -100,6 +100,9 @@ class WorkflowRuntime(
             }
             parseOutcome(outcome, session)
         }.getOrElse { error ->
+            // runCatching 连 CancellationException 一起吞 —— 那会让"停止"停不下来（也破坏结构化并发）。
+            // 取消必须原样抛出; 其余异常才转成失败结果。
+            if (error is kotlinx.coroutines.CancellationException) throw error
             WorkflowExecutionResult(
                 ok = false,
                 resultJson = null,

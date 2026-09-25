@@ -242,6 +242,9 @@ class RikkaHubApp : Application() {
         get<AppScope>().launch {
             runCatching {
                 get<WorkspaceJobManager>().reconcileOnStart()
+                // workflow 的运行是协程, 随 App 进程一起消失; 残留的"运行中"必须收敛成中断,
+                // 否则进度界面会永远停在一个早就不存在的运行上（而且它会一直挡住"同名重跑"的判断）。
+                get<me.rerere.rikkahub.data.workflow.WorkflowRunner>().reconcileOnStart()
                 get<JobScheduleEngine>().rescheduleAll()
             }.onFailure {
                 Log.e(TAG, "initWorkspaceJobs failed", it)

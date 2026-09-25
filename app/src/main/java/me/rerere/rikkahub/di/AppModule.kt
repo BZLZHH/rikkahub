@@ -113,6 +113,33 @@ val appModule = module {
         )
     }
 
+    // ---- workflow（脚本编排: 脚本自己持有循环与中间结果）----
+    // 脚本本体存**工作区文件**（/workspace/.rhe/workflows/*.js）不入库;
+    // 入库的只有运行账目与"按指纹+调用序号"的可恢复存档。
+    single {
+        me.rerere.rikkahub.data.workflow.WorkflowScriptStore(
+            workspaceRepository = get(),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.data.workflow.WorkflowAgentInvoker(
+            runner = get(),
+            toolFactory = get(),
+            settingsStore = get(),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.data.workflow.WorkflowRunner(
+            scope = get(),
+            dao = get(),
+            invoker = get(),
+            scripts = get(),
+            settingsStore = get(),
+        )
+    }
+
     // 注册进编排层: 至此 JOB 与 AGENT 两种执行体都挂在同一套配额/看门狗/取消收尾之下。
     // 用延迟工厂注册 —— 不依赖"谁先被构造", 也不怕没人注入（懒加载的单例不会被创建）。
     single(createdAtStart = true) {
@@ -202,6 +229,9 @@ val appModule = module {
             agentRunDao = get(),
             agentTranscripts = get(),
             runOrchestrator = get(),
+            workflowRunner = get(),
+            workflowScriptStore = get(),
+            workflowRunDao = get(),
         )
     }
 
