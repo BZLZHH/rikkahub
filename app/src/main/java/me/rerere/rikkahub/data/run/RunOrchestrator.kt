@@ -65,7 +65,9 @@ class RunOrchestrator(
         val registry = registries[record.kind]
             ?: return RunLaunchResult.NotStarted("no registry registered for " + record.kind)
 
-        checkQuota(record)?.let { return RunLaunchResult.NotStarted(it) }
+        if (!canStart(record.kind, record.workspaceId)) {
+            return RunLaunchResult.NotStarted(quotaMessage(record.kind, record.workspaceId))
+        }
 
         val run = ActiveRun(record = record, generation = generation.incrementAndGet())
         active[record.runId] = run
@@ -95,6 +97,31 @@ class RunOrchestrator(
 
         watch(run, executor, registry, started.handle)
         return started
+    }
+
+    /**
+     * 登记一次"已经启动了"的执行。
+     *
+     * 用于调用方必须先起进程、再拿句柄的场景（shell 任务要先拿到真实 pid 才能落库）。
+     * 配额**不在这里判** —— 调用方负责在最外层判过, 这里只做记账与看护。
+     */
+    fun attachExisting(record: RunRecord, handleProvider: () -> RunHandle?): RunHandle? {
+        val handle = handleProvider() ?: return null
+        val run = ActiveRun(record = record, generation = generation.incrementAndGet())
+        run.handle = handle
+        active[record.runId] = run
+        bumpCounts()
+        // 看护: 等句柄结束即可（状态持久化仍由执行体自己那套完成, 这里只做统计与回调）
+        scope.launch {
+            handle.await(record.maxRuntimeMs)
+            val current = active[record.runId]
+            if (current != null && current.generation == run.generation) {
+                active.remove(record.runId)
+                bumpCounts()
+                runCatching { onRunFinished(record.copy(status = RunStatus.SUCCEEDED)) }
+            }
+        }
+        return handle
     }
 
     /** 终止一次执行。 */
@@ -157,23 +184,31 @@ class RunOrchestrator(
 
     // ---- 内部 ----
 
-    private suspend fun checkQuota(record: RunRecord): String? {
+    /** 配额是否允许再起一个该 kind 的执行（配额由用户设置, 每次现读）。 */
+    suspend fun canStart(kind: RunKind, workspaceId: String): Boolean {
         val config = quotaReader()
-        val globalLimit = config.maxGlobal(record.kind)
-        val globalNow = countOf(record.kind)
-        if (globalNow >= globalLimit) {
-            return "quota_exceeded: " + globalLimit + " " + kindLabel(record.kind) +
+        if (countOf(kind) >= config.maxGlobal(kind)) return false
+        val inWorkspace = active.values.count {
+            it.record.kind == kind && it.record.workspaceId == workspaceId
+        }
+        return inWorkspace < config.maxPerWorkspace(kind)
+    }
+
+    /** 给用户/AI 看的配额说明（用于报错文案）。 */
+    suspend fun quotaMessage(kind: RunKind, workspaceId: String): String {
+        val config = quotaReader()
+        val label = kindLabel(kind)
+        val inWorkspace = active.values.count {
+            it.record.kind == kind && it.record.workspaceId == workspaceId
+        }
+        return if (countOf(kind) >= config.maxGlobal(kind)) {
+            "quota_exceeded: " + config.maxGlobal(kind) + " " + label +
                 "(s) already running (raise the limit in settings, or stop one first)"
+        } else {
+            "quota_exceeded: " + config.maxPerWorkspace(kind) + " " + label +
+                "(s) already running in this workspace (limit " + inWorkspace + "/" +
+                config.maxPerWorkspace(kind) + ")"
         }
-        val workspaceLimit = config.maxPerWorkspace(record.kind)
-        val workspaceNow = active.values.count {
-            it.record.kind == record.kind && it.record.workspaceId == record.workspaceId
-        }
-        if (workspaceNow >= workspaceLimit) {
-            return "quota_exceeded: " + workspaceLimit + " " + kindLabel(record.kind) +
-                "(s) already running in this workspace"
-        }
-        return null
     }
 
     private fun kindLabel(kind: RunKind): String = when (kind) {

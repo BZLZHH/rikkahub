@@ -4,9 +4,13 @@ import com.google.firebase.Firebase
 import com.google.firebase.analytics.analytics
 import com.google.firebase.crashlytics.crashlytics
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.flow.first
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.run.RunOrchestrator
+import me.rerere.rikkahub.data.run.RunQuotaConfig
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.job.JobScheduleEngine
 import me.rerere.rikkahub.data.job.JobWakeCoordinator
@@ -70,6 +74,22 @@ val appModule = module {
         WorkspaceTerminalSessionManager(get(), get())
     }
 
+    // 执行编排层: shell 后台任务与子代理共用（配额分账 / 看门狗 / 取消收尾）
+    single {
+        RunOrchestrator(
+            scope = get(),
+            quotaReader = {
+                val s = get<SettingsStore>().settingsFlowRaw.first()
+                RunQuotaConfig(
+                    maxConcurrentJobs = s.maxConcurrentJobs,
+                    maxConcurrentJobsPerWorkspace = s.maxConcurrentJobsPerWorkspace,
+                    maxConcurrentAgents = s.maxConcurrentAgents,
+                    maxConcurrentAgentsPerWorkspace = s.maxConcurrentAgentsPerWorkspace,
+                )
+            },
+        )
+    }
+
     // 后台任务: job_* 工具、UI、调度器共用的唯一入口
     single {
         WorkspaceJobManager(
@@ -80,6 +100,7 @@ val appModule = module {
             workspaceManager = get(),
             settingsStore = get(),
             eventBus = get(),
+            orchestrator = get(),
         )
     }
 

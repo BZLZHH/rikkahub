@@ -20,6 +20,12 @@ import me.rerere.rikkahub.data.db.entity.WorkspaceJobEntity
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.BackgroundKeepAliveService
+import me.rerere.rikkahub.data.run.RunHandle
+import me.rerere.rikkahub.data.run.RunKind
+import me.rerere.rikkahub.data.run.RunOrchestrator
+import me.rerere.rikkahub.data.run.RunQuota
+import me.rerere.rikkahub.data.run.RunRecord
+import me.rerere.rikkahub.data.run.RunStatus
 import me.rerere.workspace.JobParamResolver
 import me.rerere.workspace.RunningWorkspaceJob
 import me.rerere.workspace.WorkspaceManager
@@ -44,7 +50,16 @@ class WorkspaceJobManager(
     private val workspaceManager: WorkspaceManager,
     private val settingsStore: SettingsStore,
     private val eventBus: AppEventBus,
+    /** 执行编排层: shell 任务与子代理共用它的配额 / 看门狗 / 取消收尾。 */
+    private val orchestrator: RunOrchestrator,
 ) {
+    private val runRegistry = ShellRunRegistry(dao)
+
+    init {
+        // 把 shell 执行体接进编排层。注意这里传 this —— 本类就是 shell 执行体的实现载体。
+        orchestrator.register(ShellRunExecutor(this), runRegistry)
+    }
+
     companion object {
         const val MAX_CONCURRENT_GLOBAL = 4
         const val MAX_CONCURRENT_PER_WORKSPACE = 2
@@ -132,7 +147,7 @@ class WorkspaceJobManager(
         deferred.forEach { job ->
             val workspace = workspaceDao.getById(job.workspaceId) ?: return@forEach
             if (!workspaceManager.hasRootfs(workspace.root)) return@forEach
-            if (countRunning() >= MAX_CONCURRENT_GLOBAL) return@forEach
+            if (orchestrator.countOf(RunKind.JOB) >= RunQuota.DEFAULT_MAX_CONCURRENT_JOBS) return@forEach
             val resolved = resolveDeferred(job)
             runCatching { launchProcess(job.copy(deferredReason = null), workspace, resolved.first, resolved.second) }
                 .onSuccess { started++ }
@@ -169,7 +184,6 @@ class WorkspaceJobManager(
     ): WorkspaceJobEntity {
         val workspace = workspaceDao.getById(workspaceId) ?: error("Workspace not found: $workspaceId")
         require(workspaceManager.hasRootfs(workspace.root)) { "Rootfs is not installed for this workspace" }
-        checkQuota(workspaceId)
 
         val now = System.currentTimeMillis()
         val created = WorkspaceJobEntity(
@@ -190,7 +204,7 @@ class WorkspaceJobManager(
             maxRuntimeMs = maxRuntimeMs.coerceIn(1_000L, HARD_MAX_RUNTIME_MS),
         )
         dao.upsertJob(created)
-        return launchProcess(created, workspace, command, env)
+        return launchViaOrchestrator(created, workspace, command, env)
     }
 
     /** 由任务定义（模板）启动一次运行。 */
@@ -238,7 +252,6 @@ class WorkspaceJobManager(
             }
         }
 
-        checkQuota(def.workspaceId)
         val resolved = JobParamResolver.resolve(def.command, def.params().toParamDefs(), args)
         val require = resolved.missing
         require(require.isEmpty()) { "Missing required params: ${require.joinToString(", ")}" }
@@ -265,32 +278,121 @@ class WorkspaceJobManager(
             maxRuntimeMs = def.maxRuntimeMs.coerceIn(1_000L, HARD_MAX_RUNTIME_MS),
         )
         dao.upsertJob(created)
-        return launchProcess(created, workspace, resolved.command, def.env() + resolved.env)
+        return launchViaOrchestrator(created, workspace, resolved.command, def.env() + resolved.env)
     }
 
     private fun deriveName(command: String): String =
         command.lineSequence().firstOrNull()?.trim()?.take(60)?.takeIf { it.isNotEmpty() } ?: "job"
 
-    private fun checkQuota(workspaceId: String) {
-        val global = countRunning()
-        require(global < MAX_CONCURRENT_GLOBAL) {
-            "quota_exceeded: ${MAX_CONCURRENT_GLOBAL} jobs already running (use job_kill or job_wait)"
-        }
-        val inWorkspace = running.values.count { running ->
-            workspaceIdOf(running.workspaceRoot) == workspaceId
-        }
-        require(inWorkspace < MAX_CONCURRENT_PER_WORKSPACE) {
-            "quota_exceeded: ${MAX_CONCURRENT_PER_WORKSPACE} jobs already running in this workspace"
-        }
-    }
 
     private fun workspaceIdOf(root: String): String? =
         workspaceManager.workspaceDir(root).name
 
-    private fun countRunning(): Int = running.size
-
     private fun bumpRunning() {
         _runningCount.value = running.size
+    }
+
+    /** 把内存里的运行条目包装成编排层要的句柄。 */
+    private fun RunningEntry.toRunHandle(entryJobId: String): RunHandle = object : RunHandle {
+        override suspend fun terminate(graceMillis: Long) {
+            // 双路收尾: 先按 pid 收进程树(能连 PRoot 子树一起收干净), 再退回句柄 destroy。
+            // PRoot 自身不一定把子进程带走, 只 destroy 句柄会留下还在跑的 bash/python。
+            val pidKilled = processControl.killByPid(pid)
+            val handleOk = runCatching {
+                handle.terminate(graceMillis)
+                true
+            }.getOrDefault(false)
+            Log.i(TAG, "handle.terminate pid=" + pid + " pidKilled=" + pidKilled + " handleOk=" + handleOk)
+        }
+
+        override suspend fun await(timeoutMillis: Long): Boolean {
+            val deadline = System.currentTimeMillis() + timeoutMillis
+            while (System.currentTimeMillis() < deadline) {
+                if (!running.containsKey(entryJobId)) return true
+                kotlinx.coroutines.delay(100)
+            }
+            return !running.containsKey(entryJobId)
+        }
+
+        override val isAlive: Boolean get() = running.containsKey(entryJobId)
+    }
+
+    // ---- 编排层接入 ----
+
+    /**
+     * 启动一个 job, 但**配额由编排层判**（这样它才能和子代理分账）。
+     *
+     * 保留"配额不足就抛异常"的语义: job_* 工具与调度器都依赖这个行为向用户/AI 报错。
+     */
+    private suspend fun launchViaOrchestrator(
+        job: WorkspaceJobEntity,
+        workspace: WorkspaceEntity,
+        command: String,
+        env: Map<String, String>,
+        skipQuotaCheck: Boolean = false,
+    ): WorkspaceJobEntity {
+        val record = job.toRunRecord().copy(
+            status = RunStatus.RUNNING,
+            startedAt = System.currentTimeMillis(),
+            maxRuntimeMs = job.maxRuntimeMs,
+        )
+        // 配额必须在起进程之前判: 以前是 checkQuota() 直接 require, 调用方(job_* 工具、调度器)
+        // 依赖这个抛错来上报; 现在判定逻辑统一在编排层, 但语义保持不变。
+        if (!orchestrator.canStart(RunKind.JOB, job.workspaceId)) {
+            error(orchestrator.quotaMessage(RunKind.JOB, job.workspaceId))
+        }
+        val started = launchProcess(job, workspace, command, env)
+        // 起好了再记账 + 挂句柄看护（配额上面已判）
+        orchestrator.attachExisting(record) { handleFor(started.id) }
+        return started
+    }
+
+    /**
+     * 编排层驱动的启动入口（由 [ShellRunExecutor] 调用）。
+     *
+     * 与 [launchViaOrchestrator] 的区别: 配额已由编排层判过, 这里**不再记账**
+     * （否则会在编排器里出现两条同 runId 的记录）。但仍要起进程并挂句柄。
+     */
+    internal suspend fun launchFromOrchestrator(
+        record: RunRecord,
+        skipQuotaCheck: Boolean = true,
+    ): WorkspaceJobEntity {
+        val job = dao.getJob(record.runId) ?: error("job not found: " + record.runId)
+        if (running.containsKey(job.id)) return job
+        val workspace = workspaceDao.getById(job.workspaceId)
+            ?: error("Workspace not found: " + job.workspaceId)
+        val def = job.defId?.let { dao.getDef(it) }
+        val args = runCatching {
+            me.rerere.rikkahub.utils.JsonInstant.decodeFromString<Map<String, String>>(job.argsJson)
+        }.getOrDefault(emptyMap())
+        val command = def?.let {
+            JobParamResolver.resolve(it.command, it.params().toParamDefs(), args).command
+        } ?: job.command
+        val env = def?.let { it.env() } ?: emptyMap()
+        return launchProcess(job, workspace, command, env)
+    }
+
+    /** 取某个 job 的运行句柄（编排层用）。 */
+    fun handleFor(jobId: String): RunHandle? = running[jobId]?.toRunHandle(jobId)
+
+    /** 编排层通报"这一代已结束"。 */
+    fun onOrchestratedRunFinished(jobId: String, status: RunStatus) {
+        Log.i(TAG, "orchestrator finished job=" + jobId + " status=" + status)
+    }
+
+    /** 收掉遗留进程树（启动清理用; 顺序: 先收进程, 再改状态）。 */
+    suspend fun killLeftoverProcesses() {
+        runCatching {
+            dao.listRunningJobs().forEach { stale ->
+                if (processControl.killByPid(stale.pid)) {
+                    Log.w(TAG, "killLeftoverProcesses: killed leftover process tree for " + stale.id)
+                }
+            }
+        }.onFailure { Log.e(TAG, "killLeftoverProcesses failed", it) }
+        runCatching {
+            val reaped = processControl.reapOrphanLaunchers()
+            if (reaped > 0) Log.w(TAG, "killLeftoverProcesses: reaped " + reaped + " orphan launcher(s)")
+        }.onFailure { Log.e(TAG, "killLeftoverProcesses: orphan sweep failed", it) }
     }
 
     // ---- 执行 ----
