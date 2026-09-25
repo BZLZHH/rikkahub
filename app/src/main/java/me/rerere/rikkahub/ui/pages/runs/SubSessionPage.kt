@@ -74,6 +74,9 @@ fun SubSessionPage(sessionId: String, title: String = "") {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     var messages by remember(sessionId) { mutableStateOf<List<UIMessage>>(emptyList()) }
+    // 文件里有多少行。正常情况下与 messages.size 相等; 不等就说明有行解析不了 ——
+    // 那种情况必须**显示出来**, 否则用户看到的是一段"莫名少了后半截"的会话。
+    var rawLines by remember(sessionId) { mutableStateOf(0) }
     var meta by remember(sessionId) { mutableStateOf<SessionMeta?>(null) }
     var loaded by remember(sessionId) { mutableStateOf(false) }
 
@@ -81,8 +84,9 @@ fun SubSessionPage(sessionId: String, title: String = "") {
     LaunchedEffect(sessionId) {
         var lastCount = -1
         while (true) {
-            val decoded = withContext(Dispatchers.IO) {
-                transcripts.readMessages(sessionId).mapNotNull { line ->
+            val raw = withContext(Dispatchers.IO) { transcripts.readMessages(sessionId) }
+            val decoded = withContext(Dispatchers.Default) {
+                raw.mapNotNull { line ->
                     runCatching { JsonInstant.decodeFromString<UIMessage>(line) }.getOrNull()
                 }
             }
@@ -90,6 +94,7 @@ fun SubSessionPage(sessionId: String, title: String = "") {
                 lastCount = decoded.size
                 messages = decoded
             }
+            rawLines = raw.size
             if (meta == null) {
                 meta = withContext(Dispatchers.IO) { loadMeta(sessionId, agentRunDao, workflowDao) }
             }
@@ -121,7 +126,11 @@ fun SubSessionPage(sessionId: String, title: String = "") {
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = "子会话 · " + messages.size + " 条消息",
+                            text = if (rawLines > messages.size) {
+                                "子会话 · " + messages.size + " 条消息（文件 " + rawLines + " 行, 有解析失败的）"
+                            } else {
+                                "子会话 · " + messages.size + " 条消息"
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -92,61 +92,64 @@ class AgentRunner(
         var promptTokens = 0
         var completionTokens = 0
         var lastMessages: List<UIMessage> = emptyList()
-        // 完整对话已经写到第几条 —— 增量追加的游标, 免得同一条消息被反复写
-        var messagesWritten = 0
+        // 完整对话的增量落盘。**不能按条数做游标** —— 流式期间最后一条会原地变长,
+        // 条数不变, 那样写下去的是"空壳"版本, 真正的结论永远落盘不了。详见 ConversationWriter。
+        val conversation = ConversationWriter(transcripts, runId)
         // 预算闸: GenerationLoop 的 maxSteps 只约束**单次生成**内的循环步数,
         // 约束不了"整段运行"的总轮次。总预算必须在这里自己盯 —— 否则一个不停调用工具的
         // 子代理会无限跑下去, 烧光 token 也占着并发配额。
         val budget = AgentBudget(maxRounds = maxSteps)
 
-        generationLoop.generateText(
-            settings = settings,
-            model = model,
-            messages = listOf(UIMessage.user(prompt)),
-            assistant = assistant,
-            tools = tools,
-            // 给 GenerationLoop 一个宽松的内部上限; **总预算由下面的预算闸盯**
-            maxSteps = maxSteps * 2,
-            workspaceCwd = cwd,
-        ).collect { chunk ->
-            when (chunk) {
-                is GenerationChunk.Messages -> {
-                    lastMessages = chunk.messages
-                    // 完整对话落盘（子会话 UI 要"从头到尾"地看, 而转录那条流是保尾部截断的）。
-                    // 只写新增的部分: lastMessages 是累积列表, 每个 chunk 都重发一遍全量。
-                    if (lastMessages.size > messagesWritten) {
-                        lastMessages.drop(messagesWritten).forEach { message ->
-                            transcripts.appendMessage(runId, JsonInstant.encodeToString(message))
+        try {
+            generationLoop.generateText(
+                settings = settings,
+                model = model,
+                messages = listOf(UIMessage.user(prompt)),
+                assistant = assistant,
+                tools = tools,
+                // 给 GenerationLoop 一个宽松的内部上限; **总预算由下面的预算闸盯**
+                maxSteps = maxSteps * 2,
+                workspaceCwd = cwd,
+            ).collect { chunk ->
+                when (chunk) {
+                    is GenerationChunk.Messages -> {
+                        lastMessages = chunk.messages
+                        // 只写已经定稿的那些; 最后一条可能还在流式增长, 留到结束时再补。
+                        conversation.sync(lastMessages)
+                        steps = lastMessages.count { it.role == MessageRole.ASSISTANT }
+                        toolCalls = lastMessages.sumOf { it.getTools().size }
+                        lastMessages.asReversed().firstNotNullOfOrNull { it.usage }?.let { usage ->
+                            promptTokens = usage.promptTokens
+                            completionTokens = usage.completionTokens
                         }
-                        messagesWritten = lastMessages.size
-                    }
-                    steps = lastMessages.count { it.role == MessageRole.ASSISTANT }
-                    toolCalls = lastMessages.sumOf { it.getTools().size }
-                    lastMessages.asReversed().firstNotNullOfOrNull { it.usage }?.let { usage ->
-                        promptTokens = usage.promptTokens
-                        completionTokens = usage.completionTokens
-                    }
-                    writeTranscript(runId, "step", buildJsonObject {
-                        put("steps", steps)
-                        put("toolCalls", toolCalls)
-                        put("promptTokens", promptTokens)
-                        put("completionTokens", completionTokens)
-                        put("tail", lastMessages.lastOrNull()?.toText()?.take(2_000) ?: "")
-                    })
-                    emit(AgentEvent.Messages(lastMessages))
-                    val lastAssistant = lastMessages.lastOrNull { it.role == MessageRole.ASSISTANT }
-                    val exceeded = budget.onAssistantMessage(
-                        lastAssistant?.let { it.getTools().isNotEmpty() },
-                    )
-                    if (exceeded) {
-                        writeTranscript(runId, "budget", buildJsonObject {
-                            put("rounds", budget.rounds)
-                            put("maxSteps", maxSteps)
+                        writeTranscript(runId, "step", buildJsonObject {
+                            put("steps", steps)
+                            put("toolCalls", toolCalls)
+                            put("promptTokens", promptTokens)
+                            put("completionTokens", completionTokens)
+                            put("tail", lastMessages.lastOrNull()?.toText()?.take(2_000) ?: "")
                         })
-                        throw AgentBudgetExceededException(budget.rounds, maxSteps)
+                        emit(AgentEvent.Messages(lastMessages))
+                        val lastAssistant = lastMessages.lastOrNull { it.role == MessageRole.ASSISTANT }
+                        val exceeded = budget.onAssistantMessage(
+                            lastAssistant?.let { it.getTools().isNotEmpty() },
+                        )
+                        if (exceeded) {
+                            writeTranscript(runId, "budget", buildJsonObject {
+                                put("rounds", budget.rounds)
+                                put("maxSteps", maxSteps)
+                            })
+                            throw AgentBudgetExceededException(budget.rounds, maxSteps)
+                        }
                     }
                 }
             }
+
+        } finally {
+            // 整段结束（含被预算掐断 / 被取消）: 把最后一条补上。
+            // 漏掉这一步就是"只能看到任务、看不到结果"; 而排查被掐断的子代理时,
+            // 那半条消息往往正是最有价值的信息。
+            conversation.finish(lastMessages)
         }
 
         emit(AgentEvent.Progress(steps, toolCalls, promptTokens, completionTokens))
