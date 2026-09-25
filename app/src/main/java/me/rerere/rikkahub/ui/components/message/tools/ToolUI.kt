@@ -122,6 +122,11 @@ object ToolUIRegistry {
         JobDefRemoveToolUI,
         JobSendToolUI,
         JobScreenToolUI,
+        // subagent_* 子代理（与 job_* 平级的另一种执行体）
+        SubagentStartToolUI,
+        SubagentStatusToolUI,
+        SubagentResultToolUI,
+        SubagentKillToolUI,
     ).associateBy { it.toolName }
 
     /** 查找工具对应的渲染器, 未注册时返回默认渲染器 */

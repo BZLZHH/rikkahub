@@ -1456,6 +1456,15 @@
   <string name="jobs_page_title">Jobs</string>
   <string name="job_notification_running_title">%1$d background job(s) running</string>
   <string name="notification_background_keep_alive_jobs">%1$d background job(s) running</string>
+  <string name="tool_ui_subagent_start">Delegating to a subagent</string>
+  <string name="tool_ui_subagent_status">Checking the subagent</string>
+  <string name="tool_ui_subagent_result">Reading the subagent result</string>
+  <string name="tool_ui_subagent_kill">Stopping the subagent</string>
+  <string name="tool_ui_subagent_groups">Tools: %1$s</string>
+  <string name="tool_ui_subagent_max_steps">Budget: %1$d rounds</string>
+  <string name="tool_ui_subagent_steps">%1$d rounds</string>
+  <string name="tool_ui_subagent_calls">%1$d tool calls</string>
+  <string name="tool_ui_subagent_tokens">%1$d in / %2$d out tokens</string>
   <string name="tool_ui_job_start">Starting a background job</string>
   <string name="tool_ui_job_run">Running job</string>
   <string name="tool_ui_job_list">Checking background jobs</string>

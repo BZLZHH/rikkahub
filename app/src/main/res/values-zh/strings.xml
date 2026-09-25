@@ -1512,6 +1512,15 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="job_copied">已复制</string>
   <string name="job_mode_pipe">普通输出</string>
   <string name="job_mode_pty">可交互</string>
+  <string name="tool_ui_subagent_start">派出子代理</string>
+  <string name="tool_ui_subagent_status">查看子代理</string>
+  <string name="tool_ui_subagent_result">读取子代理结果</string>
+  <string name="tool_ui_subagent_kill">停止子代理</string>
+  <string name="tool_ui_subagent_groups">可用工具：%1$s</string>
+  <string name="tool_ui_subagent_max_steps">预算：%1$d 轮</string>
+  <string name="tool_ui_subagent_steps">%1$d 轮</string>
+  <string name="tool_ui_subagent_calls">%1$d 次工具调用</string>
+  <string name="tool_ui_subagent_tokens">输入 %1$d / 输出 %2$d tokens</string>
   <string name="tool_ui_job_start">启动后台任务</string>
   <string name="tool_ui_job_run">运行任务</string>
   <string name="tool_ui_job_list">查看后台任务</string>
