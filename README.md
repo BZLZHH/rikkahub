@@ -1,106 +1,74 @@
 <div align="center">
   <img src="docs/icon.png" alt="App Icon" width="100" />
-  <h1>RikkaHub</h1>
+  <h1>RikkaHub Enhanced</h1>
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rikkahub/rikkahub)
-[![Ask DeepWiki](https://img.shields.io/badge/zread.ai-blue?style=flat&logo=readthedocs)](https://zread.ai/rikkahub/rikkahub)
-
-A native Android LLM chat client that supports switching between different providers for
-conversations 🤖💬
-
-Click to join our Discord server 👉 [【RikkaHub】](https://discord.gg/9weBqxe5c4)
+An independent, enhanced fork of [RikkaHub](https://github.com/rikkahub/rikkahub) — a native Android LLM chat client.
 
 [简体中文](README_ZH_CN.md) | [繁體中文](README_ZH_TW.md) | English
 </div>
 
-<div align="center">
-  <img src="docs/img/chat.png" alt="Chat Interface" width="150" />
-  <img src="docs/img/desktop.png" alt="Models Picker" width="450" />
-</div>
+## Overview
 
-## 🚀 Download
+RikkaHub Enhanced tracks upstream RikkaHub and adds capabilities for long-running, unattended use.
+It ships under its own application ID and version line, so it can be installed alongside the official app.
 
-🔗 [Download from Website](https://rikka-ai.com/download) (Recommended)
+| | |
+|---|---|
+| Application ID | `me.rerere.rikkahub.enhanced` |
+| Current version | `2.5.2-rhe.1.0` (versionCode `187001`) |
+| Upstream baseline | RikkaHub `2.5.2` (versionCode `187`) |
+| License | AGPL-3.0 |
 
-🔗 [Download from Google Play](https://play.google.com/store/apps/details?id=me.rerere.rikkahub)
+## What this fork adds
 
-> [!WARNING]
-> There are many forked versions of RikkaHub. Issues with forks are unrelated to RikkaHub, so please use forks with caution to avoid privacy leaks or excessive permission requests.
+**Background running.** A persistent, silent notification backed by a foreground service keeps the app alive,
+so streaming replies, notifications and long tasks survive leaving the app. A guided setup screen covers
+notification permission, battery optimization and OEM auto-start settings.
 
-## 💖 Sponsors
+**Background jobs (`job_*` tools).** The assistant can run long-lived commands inside a workspace sandbox and
+manage them afterwards: start, list, status, incremental log reading, wait, stop, restart, delete. Includes
+reusable job definitions with parameters, scheduling (delay / interval / cron), an interactive pty mode,
+completion notifications, and optional wake-up of the conversation when a job finishes.
 
-|                                                                            Sponsor                                                                             | Description                                                                                                                                                                                                                                                                                                                                             |
-|:--------------------------------------------------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-|                                    <img src="docs/sponsors/aihubmix.png" alt="Aihubmix" width="50" /><br /><b>Aihubmix</b>                                     | Thanks to <a href="https://aihubmix.com?aff=pG7r">aihubmix.com</a> for their financial support. We recommend using aihubmix as a one-stop shop for mainstream models worldwide. (OpenAI, Claude, Google Gemini, DeepSeek, Qwen, and hundreds more).                                                                                                     |
-| <img src="docs/img/api-mart.png" alt="APIMart" width="50" /><br /><b><a href="https://go.apimart.ai/gh-rikkahub">APIMart</a></b> | Thanks to APIMart for sponsoring this project! APIMart is a low-cost API platform for AI image & video generation — GPT-Image-2 from $0.006/image, 160+ images per dollar. One async API covers both image and video: submit a task, get an ID, fetch results via polling or callback. Batch tens of thousands of images without timeouts, switch models without changing code. Pay-as-you-go with no monthly fee — <a href="https://go.apimart.ai/gh-rikkahub">sign up here</a> to get started. |
-|                    <img src="docs/sponsors/suixiang.jpg" alt="随想AI中转" width="50" /><br /><b><a href="https://sui-xiang.com">随想AI中转</a></b>                     | 感谢<a href="https://sui-xiang.com">随想AI中转</a>对本项目的赞助！随想AI中转 是一家可靠高效的 API 中继服务提供商，提供 Claude、Codex、Gemini 等的中继服务。注重隐私的中转站·无数据倒卖·无模型掺水，隐私，透明，极速售后。新账户注册每日签到就送 0.5 元测试额度，充值额度 1:1，无需订阅，按量付费。多线路冗余、跨区域容灾、自动故障切换，长链路 SSE 不中断。99.9% 可用性，关键调用从不掉队。                                                                                                               |
-|                   <img src="docs/sponsors/ztest.png" alt="真测 ztest.ai" width="50" /><br /><b><a href="https://ztest.ai">真测 ztest.ai</a></b>                    | 感谢<a href="https://ztest.ai">真测 ztest.ai</a>对本项目的赞助！真测 ztest.ai 是一个 AI 中转站模型检测平台，检测结果数据全公开，23 项探针覆盖协议、身份、能力、内容完整性、安全性、性能六大维度，交叉印证识别伪造与降级。作为独立第三方验证平台，实时监测 AI 中转站的模型真实性、响应质量与服务可用性。                                                                                                                                                                      |
-| <img src="docs/sponsors/maru.png" alt="MaruCode" width="50" /><br /><b><a href="https://api.muteki.site/register?aff=Rikkahub&promo=Rikkahub">MaruCode</a></b> | <b><a href="https://api.muteki.site/register?aff=Rikkahub&promo=Rikkahub">MaruCode</a></b> 是一家偶尔做做慈善的小破站 API，自营号池，主要提供 Codex、Claude Code、GPT Image 等主流模型，支持 Websocket 协议，明码标价(Codex 0.25x, CC 1.5x)，透明汇率(1:1)，<a href="https://api.muteki.site/register?aff=Rikkahub&promo=Rikkahub">新用户注册送 2 刀</a>。<a href="https://images-2.muteki.site">生图工作台🖼️</a> |
+**Tool-call auto-approval.** Approvals required by high-impact tools can be delegated to a model of your choice;
+anything uncertain still asks you.
 
-## ✨ Features
+**Upstream fix.** A navigation crash (`NavDisplay backstack cannot be empty`) present upstream is fixed.
 
-- 🎨 Material You Design and 🌙 Dark mode
-- 📦 Workspace: a proot-based Linux agent environment
-- 🔄 Multiple AI Provider Support: custom API / URL / models (all OpenAI, Google, Anthropic compatible api)
-- 🖼️ Multimodal input support (Image, Text Documentation, PDF, Docx)
-- 🖥️ Web access for multi-platform use
-- 🛠️ MCP support
-- 📝 Markdown Rendering (with code highlighting, Latex formulas, tables, Mermaid)
-- 🪾 Message Branching
-- 🔍 Search capabilities (Exa, Tavily, Zhipu, LinkUp, Brave, Perplexity, etc.)
-- 🧩 Prompt variables (model name, time, etc.)
-- 🤳 QR code export and import for providers
-- 🤖 Agent customization
-- 🧠 ChatGPT-like memory feature
-- 📝 AI Translation
-- 🌐 Custom HTTP request headers and request bodies
-- 💌 Silly Tavern character card import
+## Download
 
-## ✨ Contributing
+Prebuilt APKs are attached to [Releases](https://github.com/BZLZHH/rikkahub/releases) when published.
 
-This project is developed using [Android Studio](https://developer.android.com/studio). Before
-submitting a pull request, please read the [contribution guidelines](CONTRIBUTING.md).
+```bash
+adb install -r app-universal-release.apk
+```
 
-Technology stack documentation:
+The application ID differs from the official app, so both can be installed at the same time.
+In-place upgrades require the same signing key.
 
-- [Kotlin](https://kotlinlang.org/) (Development language)
-- [Koin](https://insert-koin.io/) (Dependency Injection)
-- [Jetpack Compose](https://developer.android.com/jetpack/compose) (UI framework)
-- [DataStore](https://developer.android.com/topic/libraries/architecture/datastore) (Preference data
-  storage)
-- [Room](https://developer.android.com/training/data-storage/room) (Database)
-- [Coil](https://coil-kt.github.io/coil/) (Image loading)
-- [Material You](https://m3.material.io/) (UI design)
-- [Navigation 3](https://developer.android.com/guide/navigation/navigation-3) (Navigation)
-- [Okhttp](https://square.github.io/okhttp/) (HTTP client)
-- [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) (JSON serialization)
+## Build
 
-> [!TIP]
-> You need a `google-services.json` file at `app` folder to build the app.
+Requirements: JDK 21, Android SDK (compileSdk 37).
 
-> [!IMPORTANT]  
-> The following PRs will be rejected:
-> 1. Translation related changes, such as adding new languages or updating existing translations
-> 2. Adding new features, this project is opinionated and will not accept pull requests for new features
-> 3. Large-scale refactoring and changes generated by AI
+```bash
+./gradlew :app:assembleRelease
+```
 
-## 💰 Donate
+`app/google-services.json` is not part of this repository; supply your own Firebase configuration before
+building release variants.
 
-* [Patreon](https://patreon.com/rikkahub)
-* [爱发电](https://afdian.com/a/reovo)
+## Versioning
 
-## ⭐ Star History
+- `versionCode` = upstream versionCode × 1000 + RHE build number
+- `versionName` = `<upstream version>-rhe.<RHE version>`
 
-If you like this project, please give it a star ⭐
+## Relationship to upstream
 
-<a href="https://www.star-history.com/?type=date&repos=re-ovo%2Frikkahub">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=re-ovo/rikkahub&type=date&theme=dark&legend=top-left&sealed_token=qSytWeq7LkzQQViTjK0MYlvvA_qkfuwjOxOqgbRpLUZZwok5rO6LXhpVL7Mq-q3o89BfKpzE7g66BCy18H6eiqTsD8czD0J-HejLqmHy-npcvCTHu11wZw" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=re-ovo/rikkahub&type=date&legend=top-left&sealed_token=qSytWeq7LkzQQViTjK0MYlvvA_qkfuwjOxOqgbRpLUZZwok5rO6LXhpVL7Mq-q3o89BfKpzE7g66BCy18H6eiqTsD8czD0J-HejLqmHy-npcvCTHu11wZw" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=re-ovo/rikkahub&type=date&legend=top-left&sealed_token=qSytWeq7LkzQQViTjK0MYlvvA_qkfuwjOxOqgbRpLUZZwok5rO6LXhpVL7Mq-q3o89BfKpzE7g66BCy18H6eiqTsD8czD0J-HejLqmHy-npcvCTHu11wZw" />
- </picture>
-</a>
+This is a fork and is neither affiliated with nor endorsed by the RikkaHub project. Upstream code is the
+foundation of this repository; all credit for the original work belongs to the RikkaHub authors.
+Fork-specific issues should be reported here rather than upstream.
 
-## 📄 License
+## License
 
-This project is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+AGPL-3.0. See [LICENSE](LICENSE). As required by the license, the complete corresponding source of this fork
+is available in this repository.
