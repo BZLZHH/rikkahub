@@ -123,6 +123,7 @@ fun WorkflowRunPage(runId: String) {
                     tokens = agents.sumOf { it.tokensIn + it.tokensOut },
                     agents = agents,
                     error = r.error,
+                    progressJson = r.progressJson,
                 )
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -168,6 +169,7 @@ private fun RunHeader(
     tokens: Int,
     agents: List<WorkflowAgentEntity>,
     error: String?,
+    progressJson: String,
 ) {
     val accent = statusColor(status)
     Surface(color = CustomColors.topBarColors.containerColor) {
@@ -224,6 +226,40 @@ private fun RunHeader(
                 if (agentsReused > 0) HeaderStat("复用", agentsReused.toString())
                 HeaderStat("tok", formatTokens(tokens))
                 HeaderStat("phase", (agents.mapNotNull { it.phase }.distinct().size).toString())
+            }
+
+            // 最近几条活动: 这是"此刻正在发生什么" —— 光有 phases 与 agent 列表,
+            // 用户看不出脚本刚打了什么日志、刚进了哪个阶段。
+            val activity = remember(progressJson) { recentActivity(progressJson, limit = 3) }
+            if (activity.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    activity.forEach { entry ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = if (entry.kind == "phase") "▸" else "·",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (entry.kind == "phase") {
+                                    MaterialTheme.colorScheme.primary
+                                } else if (entry.kind == "warn") {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                            Text(
+                                text = entry.text,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
             }
 
             error?.takeIf { it.isNotBlank() }?.let {
@@ -467,6 +503,20 @@ private fun agentMetaLine(agent: WorkflowAgentEntity): String {
 }
 
 private val Color_Transparent = androidx.compose.ui.graphics.Color.Transparent
+
+private data class ActivityEntry(val kind: String, val text: String)
+
+/** 进度时间线里最近的几条（最新的在最后）。解析失败就当没有, 不打扰界面。 */
+private fun recentActivity(progressJson: String, limit: Int): List<ActivityEntry> {
+    if (progressJson.isBlank()) return emptyList()
+    val array = runCatching { JsonInstant.parseToJsonElement(progressJson) as? JsonArray }
+        .getOrNull() ?: return emptyList()
+    return array.takeLast(limit).mapNotNull { element ->
+        val obj = element as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+        val text = (obj["text"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+        ActivityEntry((obj["kind"] as? JsonPrimitive)?.contentOrNull ?: "log", text)
+    }
+}
 
 /** 从 phasesJson 里读回有序的 phase 名。 */
 private fun parseStringList(json: String?): List<String> {

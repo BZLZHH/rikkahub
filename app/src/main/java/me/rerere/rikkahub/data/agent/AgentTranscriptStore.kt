@@ -68,6 +68,45 @@ class AgentTranscriptStore(
         }
     }
 
+    /**
+     * 正在生成的那条消息的**单独**落点。
+     *
+     * 为什么另起一个文件, 而不是往 messages 里追加: 那条消息是**会被改写**的
+     * （流式期间原地变长）。追加式文件没法"改最后一行", 而重写整个文件既慢又容易读坏。
+     * 单独一个小文件每次整体覆盖, 最省事也最不容易出错。
+     */
+    fun liveFileFor(runId: String): File = File(baseDir, runId + ".live.json")
+
+    /**
+     * 覆盖写"正在生成的那条"。
+     *
+     * 先写临时文件再 rename: rename 在同一文件系统上是**原子**的,
+     * 于是界面不会读到"写了一半的 JSON"（那会让整条消息在页面上闪一下消失）。
+     */
+    fun writeLive(runId: String, messageJson: String) {
+        runCatching {
+            val file = liveFileFor(runId)
+            file.parentFile?.mkdirs()
+            val tmp = File(file.parentFile, file.name + ".tmp")
+            tmp.writeText(messageJson)
+            if (!tmp.renameTo(file)) {
+                file.writeText(messageJson)
+                tmp.delete()
+            }
+        }
+    }
+
+    /** 读回"正在生成的那条"; 没有则 null。 */
+    fun readLive(runId: String): String? {
+        val file = liveFileFor(runId)
+        if (!file.isFile) return null
+        return runCatching { file.readText().takeIf { it.isNotBlank() } }.getOrNull()
+    }
+
+    fun clearLive(runId: String) {
+        runCatching { liveFileFor(runId).delete() }
+    }
+
     fun messageCount(runId: String): Int {
         val file = messagesFileFor(runId)
         if (!file.isFile) return 0
@@ -88,6 +127,7 @@ class AgentTranscriptStore(
     fun delete(runId: String) {
         runCatching { fileFor(runId).delete() }
         runCatching { messagesFileFor(runId).delete() }
+        runCatching { liveFileFor(runId).delete() }
     }
 
     private fun truncateTail(file: File) {

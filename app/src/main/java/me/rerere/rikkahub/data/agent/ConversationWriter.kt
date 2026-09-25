@@ -29,6 +29,8 @@ import me.rerere.rikkahub.utils.JsonInstant
 internal class ConversationWriter(
     private val transcripts: AgentTranscriptStore,
     private val runId: String,
+    /** "正在生成的那条"的写盘间隔; 测试传 0 好让断言确定。 */
+    private val liveWriteIntervalMs: Long = LIVE_WRITE_INTERVAL_MS,
 ) {
     /** 已经落盘的条数。只增不减: 已经写过的消息内容不会再变（见上面的说明）。 */
     private var written = 0
@@ -48,6 +50,23 @@ internal class ConversationWriter(
             transcripts.appendMessage(runId, JsonInstant.encodeToString(messages[written]))
             written++
         }
+
+        // 正在生成的那条也让人看得见 —— 否则"边跑边看"就是一句空话:
+        // 一个 agent 可能跑几分钟, 而它的输出要等定稿才出现。
+        // 它写在**单独的文件**里（会被整体覆盖）, 不混进追加式的 messages。
+        if (includeLast) {
+            transcripts.clearLive(runId)
+        } else {
+            val inFlight = messages.lastOrNull()
+            if (inFlight != null && written == messages.size - 1) {
+                val now = System.currentTimeMillis()
+                // 节流: 流式每秒钟可能来几十个 chunk, 每个都写一次盘没必要
+                if (now - lastLiveWriteAt >= liveWriteIntervalMs) {
+                    lastLiveWriteAt = now
+                    transcripts.writeLive(runId, JsonInstant.encodeToString(inFlight))
+                }
+            }
+        }
     }
 
     /** 整段运行结束: 把最后一条也补上。 */
@@ -55,4 +74,12 @@ internal class ConversationWriter(
 
     /** 已经落盘多少条（测试与排查用）。 */
     fun writtenCount(): Int = written
+
+    /** 上一次写"正在生成的那条"的时刻, 用于节流。 */
+    private var lastLiveWriteAt = 0L
+
+    companion object {
+        /** "正在生成的那条"最多 5 次/秒写一次。够跟得上人眼, 又不至于把盘写爆。 */
+        const val LIVE_WRITE_INTERVAL_MS = 200L
+    }
 }

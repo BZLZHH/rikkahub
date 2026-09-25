@@ -82,26 +82,38 @@ fun SubSessionPage(sessionId: String, title: String = "") {
 
     // 边跑边看: 子代理还在写这个文件时, 页面要跟着长出来。跑完了就停, 不再空转。
     LaunchedEffect(sessionId) {
-        var lastCount = -1
+        var lastSignature = ""
         while (true) {
-            val raw = withContext(Dispatchers.IO) { transcripts.readMessages(sessionId) }
-            val decoded = withContext(Dispatchers.Default) {
-                raw.mapNotNull { line ->
-                    runCatching { JsonInstant.decodeFromString<UIMessage>(line) }.getOrNull()
+            // 定稿的部分 + **正在生成的那条**。后者单独存（见 AgentTranscriptStore.writeLive）——
+            // 没有它, "边跑边看"就是空话: 一个 agent 可能跑几分钟, 而它的输出要等定稿才出现。
+            val settled = withContext(Dispatchers.IO) { transcripts.readMessages(sessionId) }
+            val live = withContext(Dispatchers.IO) { transcripts.readLive(sessionId) }
+            rawLines = settled.size
+
+            // 先比指纹再解码: 内容没变时不必每条都重新解析一遍 JSON
+            val signature = settled.size.toString() + ":" + (live?.length ?: 0)
+            if (signature != lastSignature) {
+                lastSignature = signature
+                messages = withContext(Dispatchers.Default) {
+                    val list = settled.mapNotNull { decodeMessage(it) }.toMutableList()
+                    // 收尾那一瞬间（定稿已写入、live 还没清掉）同一条会同时出现在两边,
+                    // 直接比一下内容就不会闪出一个重复 —— 比"先清 live 再写定稿"更稳,
+                    // 后者会闪一下"消息消失了"。
+                    live?.let { decodeMessage(it) }?.let { inFlight ->
+                        if (list.lastOrNull() != inFlight) list.add(inFlight)
+                    }
+                    list
                 }
             }
-            if (decoded.size != lastCount) {
-                lastCount = decoded.size
-                messages = decoded
-            }
-            rawLines = raw.size
-            if (meta == null) {
-                meta = withContext(Dispatchers.IO) { loadMeta(sessionId, agentRunDao, workflowDao) }
-            }
+
+            // 每次都要拿新的状态: 它决定还要不要继续轮询（原先只取一次, 于是跑完了也停不下来）
+            withContext(Dispatchers.IO) { loadMeta(sessionId, agentRunDao, workflowDao) }?.let { meta = it }
             loaded = true
+
             val status = meta?.status
             if (status != null && RunStatus.from(status).isFinished) break
-            delay(1200)
+            // 跑着的时候快一点: 600ms 够让人看到字在长, 又不至于把盘读爆
+            delay(600)
         }
     }
 
@@ -169,6 +181,9 @@ fun SubSessionPage(sessionId: String, title: String = "") {
         }
     }
 }
+
+private fun decodeMessage(json: String): UIMessage? =
+    runCatching { JsonInstant.decodeFromString<UIMessage>(json) }.getOrNull()
 
 /** 子会话的元信息: 优先按子代理查, 查不到再按 workflow 里的 agent 行查。 */
 private data class SessionMeta(

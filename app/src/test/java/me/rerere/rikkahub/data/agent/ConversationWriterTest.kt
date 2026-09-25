@@ -5,6 +5,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.utils.JsonInstant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -56,6 +57,39 @@ class ConversationWriterTest {
             "我在读文件, 结论是 X",
             decoded[1].toText(),
         )
+    }
+
+    @Test
+    fun inFlightMessageIsVisibleWhileStreaming() {
+        // "边跑边看"靠的就是这个: 定稿文件里只有已经写完的消息,
+        // 而正在生成的那条单独放在 live 里, 每次整体覆盖。
+        val store = newStore()
+        val writer = ConversationWriter(store, "r6", liveWriteIntervalMs = 0)
+        val task = UIMessage.user("任务")
+
+        writer.sync(listOf(task, reply("我在")))
+        writer.sync(listOf(task, reply("我在读文件")))
+
+        val live = store.readLive("r6")
+        assertEquals("流式内容要能立刻看到", "我在读文件", JsonInstant.decodeFromString<UIMessage>(live!!).toText())
+        assertEquals("定稿文件里不能有它, 否则会写出作废的版本", 1, store.readMessages("r6").size)
+
+        writer.finish(listOf(task, reply("我在读文件, 结论是 X")))
+        assertNull("结束后 live 要清掉, 否则界面会一直挂着一份过期的内容", store.readLive("r6"))
+        assertEquals(2, store.readMessages("r6").size)
+        assertEquals("我在读文件, 结论是 X", store(store, "r6").last().toText())
+    }
+
+    @Test
+    fun liveTailIsThrottled() {
+        // 流式每秒可能来几十个 chunk, 每个都写盘没必要 —— 节流要真的生效
+        val store = newStore()
+        val writer = ConversationWriter(store, "r7", liveWriteIntervalMs = 60_000)
+        val task = UIMessage.user("任务")
+        writer.sync(listOf(task, reply("第一次")))
+        val first = store.readLive("r7")
+        writer.sync(listOf(task, reply("第二次")))
+        assertEquals("同一时间窗内不该再写", first, store.readLive("r7"))
     }
 
     @Test
