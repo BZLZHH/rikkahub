@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.rikkahub.data.run.RunStatus
 import me.rerere.rikkahub.utils.JsonInstant
 
@@ -85,6 +86,13 @@ class WorkflowRuntime(
      * 默认空实现: 单测与"只关心脚本返回值"的调用方不必被迫接这一层。
      */
     private val tracker: WorkflowAgentTracker = NoopWorkflowAgentTracker,
+    /**
+     * 整趟运行的默认推理档位（`off`/`auto`/`low`/`medium`/`high`/`xhigh`/`max`）。
+     *
+     * null 表示**不干预**: 子代理继承父助手的档位 —— 也就是"你正在用的那一档"。
+     * 脚本里 `agent(p, { reasoning: "..." })` 可以逐个覆盖它。
+     */
+    private val defaultReasoning: String? = null,
 ) {
 
     suspend fun execute(
@@ -93,12 +101,23 @@ class WorkflowRuntime(
     ): WorkflowExecutionResult {
         val session = WorkflowCallSession(script.fingerprint)
         val gate = Semaphore(agentConcurrency.coerceAtLeast(1))
+        // 运行级档位只解析一次, 并且**认不出就出声** —— 一个 typo 不该变成"怎么调都没反应"。
+        val runReasoning = defaultReasoning?.takeIf { it.isNotBlank() }?.let { spec ->
+            ReasoningLevel.fromSpec(spec).also { level ->
+                if (level == null) {
+                    progress?.onLog(
+                        "reasoning 认不出: \"" + spec + "\"（可用: " + ReasoningLevel.specs + "）, 改为继承主会话设置",
+                        "warn",
+                    )
+                }
+            }
+        }
         return runCatching {
             val argsLiteral = JsonPrimitive(args.toString()).toString()
             val wrapped = WorkflowScriptPrelude.wrap(script.body, argsLiteral)
 
             val outcome = quickJs {
-                installHostApi(session, gate)
+                installHostApi(session, gate, runReasoning)
                 // 第一趟: 触发脚本; 宿主 async 绑定会在这一趟里跑完。
                 // 注意这里**只跑一次** —— 若在轮询里反复求值整段脚本,
                 // 脚本体（含它里面的 agent 调用）会被重复执行, 那是灾难性的。
@@ -122,7 +141,11 @@ class WorkflowRuntime(
         }
     }
 
-    private fun com.dokar.quickjs.QuickJs.installHostApi(session: WorkflowCallSession, gate: Semaphore) {
+    private fun com.dokar.quickjs.QuickJs.installHostApi(
+        session: WorkflowCallSession,
+        gate: Semaphore,
+        runReasoning: ReasoningLevel?,
+    ) {
         function("__rhePhase") { args: Array<Any?> ->
             val title = args.getOrNull(0) as? String ?: ""
             // 运行时自己也要记: 后续每个 agent 调用要带上"它是在哪个 phase 里起的"
@@ -141,8 +164,33 @@ class WorkflowRuntime(
             val prompt = args.getOrNull(0) as? String ?: return@asyncFunction null
             val schemaJson = (args.getOrNull(1) as? String)?.takeIf { it.isNotBlank() }
             val label = (args.getOrNull(2) as? String)?.takeIf { it.isNotBlank() }
-            runAgentCall(session, gate, prompt, schemaJson, label)
+            val reasoningSpec = (args.getOrNull(3) as? String)?.takeIf { it.isNotBlank() }
+            runAgentCall(session, gate, prompt, schemaJson, label, reasoningSpec, runReasoning)
         }
+    }
+
+    /**
+     * 决定这一条 agent 用哪一档推理: 它自己的 -> 整趟的默认 -> 继承（null）。
+     *
+     * 认不出的写法**只警告、不失败**: 一个拼错的档位没道理让整趟运行白跑,
+     * 但也不能装作没看见 —— 所以进进度时间线。
+     */
+    private fun resolveReasoning(
+        spec: String?,
+        runReasoning: ReasoningLevel?,
+        index: Int,
+    ): String? {
+        if (spec == null) return runReasoning?.effort
+        val level = ReasoningLevel.fromSpec(spec)
+        if (level == null) {
+            progress?.onLog(
+                "agent #" + index + " 的 reasoning 认不出: \"" + spec +
+                    "\"（可用: " + ReasoningLevel.specs + "）, 这一条改为继承",
+                "warn",
+            )
+            return runReasoning?.effort
+        }
+        return level.effort
     }
 
     /** 一次 agent 调用的完整语义: 序号 -> 复用 -> 排队 -> 结构化输出 -> 存档。 */
@@ -152,6 +200,8 @@ class WorkflowRuntime(
         prompt: String,
         schemaJson: String?,
         label: String?,
+        reasoningSpec: String?,
+        runReasoning: ReasoningLevel?,
     ): String? {
         val index = session.nextIndex()
         if (index >= maxAgents) {
@@ -166,6 +216,8 @@ class WorkflowRuntime(
             schemaJson = schemaJson,
             label = label,
             phase = session.currentPhase,
+            // 每条各自覆盖整趟的默认; 都没有就是 null = 继承父助手
+            reasoning = resolveReasoning(reasoningSpec, runReasoning, index),
         )
 
         val cached = recall(session, index, prompt, schemaJson, label)

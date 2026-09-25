@@ -79,6 +79,8 @@ private fun runTool(ctx: WorkflowToolContext, needsApproval: (String) -> Boolean
         append("pipeline(items, fn) runs one per item; parallel(tasks) runs a set at once; ")
         append("phase(title) and log(message) report progress; args holds the input you pass in. ")
         append("Intermediate results stay in script variables, so only the script\'s return value comes back. ")
+        append("Each agent can also set its own reasoning effort: agent(prompt, { reasoning: \"high\" }) — ")
+        append("fan out cheap readers at low effort, then synthesize at high effort. ")
         append("Date.now(), Math.random() and new Date() throw on purpose: a rerun must repeat the same agent calls. ")
         append("Returns the result when it finishes within the wait window, otherwise a runId to poll with workflow_status.")
     },
@@ -89,6 +91,7 @@ private fun runTool(ctx: WorkflowToolContext, needsApproval: (String) -> Boolean
                 put("name", schemaString("Name of a saved workflow to run instead of an inline script"))
                 put("title", schemaString("ALWAYS SET THIS: a short title in the user language naming what this run does. It is what the user sees in the run list; without it inline scripts all show up as \"(inline workflow)\"."))
                 put("model", schemaString("Model for the subagents, as \"provider/model\" (e.g. \"DeepSeek/deepseek-chat\") or a model name. Omit to use the model of the current conversation, which is usually what the user wants."))
+                put("reasoning", schemaString("Reasoning effort for the subagents: off, auto, low, medium, high, xhigh or max. Omit to inherit the current conversation\'s setting. A single agent can override it from the script with agent(prompt, { reasoning: \"high\" })."))
                 put("save_as", schemaString("Save this inline script under this name for reuse"))
                 put("args", buildJsonObject {
                     put("type", "object")
@@ -132,6 +135,7 @@ private suspend fun executeRun(
             // "解析不到就报错并列出候选"的逻辑在那里, 工具层不做第二套。
             title = params.strJson("title")?.takeIf { it.isNotBlank() },
             modelSpec = params.strJson("model")?.takeIf { it.isNotBlank() },
+            reasoningSpec = params.strJson("reasoning")?.takeIf { it.isNotBlank() },
             defaultModelId = ctx.defaultModelId,
             conversationId = ctx.conversationId,
             assistantId = ctx.assistantId,

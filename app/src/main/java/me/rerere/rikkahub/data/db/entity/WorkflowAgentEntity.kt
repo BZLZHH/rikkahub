@@ -37,6 +37,8 @@ data class WorkflowAgentEntity(
     val tokensIn: Int = 0,
     val tokensOut: Int = 0,
     /** 子会话转录 id（UI 用它读完整对话） */
+    /** 这一条实际用的推理档位; null = 继承主会话设置（可空, 老行补 NULL） */
+    val reasoning: String? = null,
     val sessionId: String? = null,
     val resultText: String? = null,
     val error: String? = null,

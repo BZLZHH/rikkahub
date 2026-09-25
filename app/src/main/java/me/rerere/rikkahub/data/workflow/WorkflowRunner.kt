@@ -62,6 +62,12 @@ data class WorkflowRunRequest(
     val modelSpec: String? = null,
     /** 主会话当前使用的模型 id; [modelSpec] 没给时的默认值。 */
     val defaultModelId: String? = null,
+    /**
+     * 整趟运行的推理档位: `off` / `auto` / `low` / `medium` / `high` / `xhigh` / `max`。
+     *
+     * 不填 = **不干预**, 子代理继承主会话那一档; 脚本里 `agent(p, { reasoning })` 可逐个覆盖。
+     */
+    val reasoningSpec: String? = null,
 )
 
 sealed interface WorkflowStartResult {
@@ -263,6 +269,7 @@ class WorkflowRunner(
                 journal = DaoWorkflowJournal(dao),
                 agentConcurrency = agentConcurrency,
                 tracker = tracker,
+                defaultReasoning = request.reasoningSpec,
             )
             return runtime.execute(script, request.args)
         } finally {
@@ -292,6 +299,7 @@ class WorkflowRunner(
                         label = call.label,
                         prompt = call.prompt,
                         phase = call.phase,
+                        reasoning = call.reasoning,
                         // 复用命中的行一出生就是完成态: 它确实"完成"了, 只是没花时间
                         status = if (reused) RunStatus.SUCCEEDED.name else RunStatus.RUNNING.name,
                         reused = reused,
@@ -341,6 +349,7 @@ class WorkflowRunner(
                         label = call.label,
                         prompt = call.prompt,
                         phase = call.phase,
+                        reasoning = call.reasoning,
                         status = status,
                     )).copy(
                         status = status,

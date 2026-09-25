@@ -456,6 +456,8 @@ private fun AgentRow(agent: WorkflowAgentEntity, onClick: () -> Unit) {
 private fun agentMetaLine(agent: WorkflowAgentEntity): String {
     val parts = buildList {
         agent.modelName?.takeIf { it.isNotBlank() }?.let { add(it) }
+        // 档位只在**单独指定过**时才显示: 继承主会话是常态, 每条都标一遍反而变成噪音
+        agent.reasoning?.takeIf { it.isNotBlank() }?.let { add("推理 " + it) }
         val tokens = agent.tokensIn + agent.tokensOut
         if (tokens > 0) add(formatTokens(tokens) + " tok")
         if (agent.steps > 0) add(agent.steps.toString() + " 轮")

@@ -27,6 +27,7 @@ class WorkflowRuntimeSemanticsTest {
         maxAgents: Int = WorkflowLimits.MAX_AGENTS_PER_RUN,
         maxSchemaAttempts: Int = WorkflowLimits.MAX_SCHEMA_ATTEMPTS,
         tracker: WorkflowAgentTracker = NoopWorkflowAgentTracker,
+        defaultReasoning: String? = null,
     ) = WorkflowRuntime(
         // 契约升级成"一次调用"对象后, 测试仍只需要看提示词/schema/label 三样
         agentHandler = WorkflowAgentHandler { call, _ -> onAgent(call.prompt, call.schemaJson, call.label) },
@@ -37,6 +38,7 @@ class WorkflowRuntimeSemanticsTest {
         maxAgents = maxAgents,
         maxSchemaAttempts = maxSchemaAttempts,
         tracker = tracker,
+        defaultReasoning = defaultReasoning,
     )
 
     /** 失败信息加引号带长度: 字面量 "null" 与真 null 打印出来一模一样, 这坑踩过一次。 */
@@ -364,6 +366,59 @@ class WorkflowRuntimeSemanticsTest {
         assertFalse("应当失败", r.ok)
         assertEquals("失败的调用也必须收尾, 否则 UI 上会永远停在\"运行中\"", 1, tracker.finished.size)
         assertEquals("FAILED", tracker.finished.single().third)
+    }
+
+    // ---- 推理档位 ----
+
+    @Test
+    fun reasoningIsPerAgentWithRunDefault() = runBlocking {
+        // 最常见的形态: 扇出一堆便宜的读手, 再用一个高强度的综合者 ——
+        // "整趟一个档位"表达不了它, 所以逐 agent 的覆盖是必须的。
+        val tracker = RecordingTracker()
+        val r = run(
+            "const a = await agent(\"a\", { reasoning: \"high\" })\n" +
+                "const b = await agent(\"b\")\nreturn [a, b]",
+            runtime(onAgent = { _, _, _ -> "x" }, tracker = tracker, defaultReasoning = "low"),
+        )
+        assertTrue("应成功: " + show(r.error), r.ok)
+        assertEquals(
+            "自己的档位优先, 没写的用整趟默认",
+            listOf("high", "low"),
+            tracker.started.map { it.first.reasoning },
+        )
+    }
+
+    @Test
+    fun noReasoningAnywhereMeansInherit() = runBlocking {
+        val tracker = RecordingTracker()
+        val r = run("return await agent(\"a\")", runtime(onAgent = { _, _, _ -> "x" }, tracker = tracker))
+        assertTrue(r.ok)
+        assertEquals(
+            "不指定就是 null = 继承主会话那一档",
+            listOf(null),
+            tracker.started.map { it.first.reasoning },
+        )
+    }
+
+    @Test
+    fun unknownReasoningWarnsButDoesNotFailTheRun() = runBlocking {
+        // 一个拼错的档位没道理让整趟白跑, 但也不能装作没看见 —— 要进进度时间线
+        val logs = mutableListOf<String>()
+        val sink = object : WorkflowProgressSink {
+            override fun onPhase(title: String) {}
+            override fun onLog(message: String, level: String) { logs += level + ":" + message }
+        }
+        val tracker = RecordingTracker()
+        val r = run(
+            "return await agent(\"a\", { reasoning: \"turbo\" })",
+            runtime(onAgent = { _, _, _ -> "x" }, progress = sink, tracker = tracker),
+        )
+        assertTrue("不该因此失败: " + show(r.error), r.ok)
+        assertEquals("认不出就退回继承", listOf(null), tracker.started.map { it.first.reasoning })
+        assertTrue(
+            "必须出声: " + logs,
+            logs.any { it.startsWith("warn:") && it.contains("turbo") },
+        )
     }
 
     // ---- 进度 ----

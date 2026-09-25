@@ -13,6 +13,12 @@ data class WorkflowAgentCall(
     val label: String?,
     /** 开始这次调用时脚本所处的 phase（脚本没调过 phase() 就是 null） */
     val phase: String?,
+    /**
+     * 这次调用实际使用的推理档位（已解析并落定）; null 表示继承父助手的设置。
+     *
+     * 存"落定后的值"而不是"脚本写的字符串": UI 上要显示的是**它到底用了什么**。
+     */
+    val reasoning: String? = null,
 )
 
 /**

@@ -63,7 +63,7 @@ import me.rerere.rikkahub.utils.JsonInstant
     //
     // v31: 加"逐 agent 的行"。**绝不复用版本号** —— 30 已经交出去过（用户手上那版 APK 就是 30）,
     // 复用它会原样重演上面那次事故。
-    version = 32,
+    version = 33,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -93,6 +93,8 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 30, to = 31),
         // v31 -> v32: 只加一列可空列, 纯自动迁移
         AutoMigration(from = 31, to = 32),
+        // v32 -> v33: workflow_agents 加 reasoning（可空列, 纯自动迁移）
+        AutoMigration(from = 32, to = 33),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)

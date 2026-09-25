@@ -8,6 +8,7 @@ import me.rerere.rikkahub.data.agent.AgentEvent
 import me.rerere.rikkahub.data.agent.AgentRunner
 import me.rerere.rikkahub.data.agent.AgentToolFactory
 import me.rerere.rikkahub.data.agent.AgentToolGroup
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.rikkahub.data.agent.buildAgentInstructions
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
@@ -82,6 +83,14 @@ class WorkflowAgentInvoker(
             conversationId = conversationId,
         )
 
+        // 推理档位: 只有这一条**指定了**才覆盖, 否则原样继承父助手的 ——
+        // "不指定就用你正在用的那一档"是最不容易出意外的默认。
+        // AgentRunner 会在 parentAssistant 基础上再 copy, 所以这里换掉父助手即可生效。
+        val agentParent = call.reasoning
+            ?.let { ReasoningLevel.fromSpec(it) }
+            ?.let { parentAssistant.copy(reasoningLevel = it) }
+            ?: parentAssistant
+
         val runId = Uuid.random().toString()
         // 一有 runId 就报出去: UI 要用它去读**完整子会话**。
         // 这一刻子系统里还什么都没有, 但 UI 会自己去轮询文件, 所以先给钥匙最重要。
@@ -94,7 +103,7 @@ class WorkflowAgentInvoker(
                 runId = runId,
                 settings = settings,
                 model = model,
-                parentAssistant = parentAssistant,
+                parentAssistant = agentParent,
                 tools = tools,
                 instructions = buildAgentInstructions(label ?: "workflow step", groups, false),
                 prompt = prompt,

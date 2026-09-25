@@ -103,7 +103,11 @@ internal object WorkflowScriptPrelude {
         "  const schema = options.schema;",
         "  const schemaJson = (schema === undefined || schema === null) ? null : JSON.stringify(schema);",
         "  const label = options.label;",
-        "  const pending = globalThis.__rheAgent(String(prompt), schemaJson, (label === undefined || label === null) ? null : String(label));",
+        // reasoning 是**每个 agent 各自**的: "扇出 20 个便宜的读手, 再用一个高强度的综合者"
+        // 这种最常见的 workflow 形态, 靠"整趟一个档位"是表达不出来的。
+        "  const reasoning = options.reasoning;",
+        "  const reasoningSpec = (reasoning === undefined || reasoning === null) ? null : String(reasoning);",
+        "  const pending = globalThis.__rheAgent(String(prompt), schemaJson, (label === undefined || label === null) ? null : String(label), reasoningSpec);",
         "  if (schemaJson === null) return pending;",
         // 带 schema 时脚本要的是**对象**, 不是一段 JSON 文本:
         //   const found = await agent(\"列出文件\", { schema: {...} });
