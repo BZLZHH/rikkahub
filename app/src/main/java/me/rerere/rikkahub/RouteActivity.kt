@@ -104,6 +104,7 @@ import me.rerere.rikkahub.ui.pages.jobs.JobsPage
 import me.rerere.rikkahub.ui.pages.log.LogPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
+import me.rerere.rikkahub.ui.pages.setting.SettingBackgroundExecutionPage
 import me.rerere.rikkahub.ui.pages.setting.SettingBackgroundRunningPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesThemePage
@@ -497,6 +498,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingBackgroundRunningPage()
                             }
 
+                            entry<Screen.SettingBackgroundExecution> {
+                                SettingBackgroundExecutionPage()
+                            }
+
                             entry<Screen.Debug> {
                                 DebugPage()
                             }
@@ -722,6 +727,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingBackgroundRunning : Screen
+
+    @Serializable
+    data object SettingBackgroundExecution : Screen
 
     @Serializable
     data object Debug : Screen
