@@ -133,6 +133,23 @@ val appModule = module {
         )
     }
 
+    // ---- 工作流（多步骤编排; 步骤本身是 shell 后台任务）----
+    single {
+        me.rerere.rikkahub.data.workflow.WorkflowRunner(
+            jobManager = get(),
+            workspaceRepository = get(),
+            outputsBaseDir = java.io.File(get<android.content.Context>().filesDir, "workflow-outputs"),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.data.workflow.WorkflowRunEngine(
+            scope = get(),
+            dao = get(),
+            runner = get(),
+        )
+    }
+
     // 后台任务: job_* 工具、UI、调度器共用的唯一入口
     single {
         WorkspaceJobManager(
@@ -202,6 +219,8 @@ val appModule = module {
             agentRunDao = get(),
             agentTranscripts = get(),
             runOrchestrator = get(),
+            workflowDao = get(),
+            workflowEngine = get(),
         )
     }
 
