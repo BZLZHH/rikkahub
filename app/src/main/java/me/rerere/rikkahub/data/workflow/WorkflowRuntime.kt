@@ -4,13 +4,11 @@ import com.dokar.quickjs.binding.asyncFunction
 import com.dokar.quickjs.binding.function
 import com.dokar.quickjs.quickJs
 import kotlinx.coroutines.delay
-import me.rerere.rikkahub.utils.JsonInstant
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import me.rerere.rikkahub.utils.JsonInstant
 
 /** 脚本想要一个子代理干活时, 运行时需要提供的唯一能力。 */
 fun interface WorkflowAgentHandler {
@@ -130,9 +128,18 @@ class WorkflowRuntime(
         val obj = runCatching {
             JsonInstant.parseToJsonElement(outcome) as? JsonObject
         }.getOrNull() ?: return WorkflowExecutionResult(false, null, "unexpected runtime output")
-        val error = obj["error"]?.jsonPrimitive?.contentOrNullSafe()
-        if (error != null) return WorkflowExecutionResult(false, null, error)
-        val hasResult = obj["hasResult"]?.jsonPrimitive?.content == "true"
+
+        // 判定"有没有错"必须看**布尔标志**, 不能看 error 字段是不是 null。
+        // 血的教训: JsonNull.content 返回的是**字面量字符串 "null"**（4 个字符）, 不是 Kotlin null。
+        // 早先按 content != null 判定时, 每个**成功**的脚本都会被判成失败并给出 error="null";
+        // 而失败信息打印出来正是 "应成功: null", 看起来像"error 是 null", 排查方向被彻底带偏。
+        // JS 侧 throw null 也会产生字面量 "null", 靠字符串无法与真错误区分, 所以用标志位。
+        val hasError = (obj["hasError"] as? JsonPrimitive)?.booleanOrNull == true
+        if (hasError) {
+            val message = (obj["error"] as? JsonPrimitive)?.contentOrNull
+            return WorkflowExecutionResult(false, null, message ?: "workflow failed")
+        }
+        val hasResult = (obj["hasResult"] as? JsonPrimitive)?.booleanOrNull == true
         return WorkflowExecutionResult(
             ok = true,
             resultJson = if (hasResult) obj["result"]?.toString() else null,
@@ -140,16 +147,26 @@ class WorkflowRuntime(
         )
     }
 
-    private fun JsonPrimitive.contentOrNullSafe(): String? =
-        runCatching { this.content }.getOrNull()
-
     private fun wrap(body: String, argsLiteral: String): String {
         val lines = listOf(
             "globalThis.args = JSON.parse($argsLiteral);",
             "globalThis.__rheDone = false; globalThis.__rheResult = null; globalThis.__rheError = null;",
             "globalThis.phase = globalThis.__rhePhase;",
             "globalThis.log = globalThis.__rheLog;",
-            "globalThis.agent = globalThis.__rheAgent;",
+            // agent(prompt, options) —— 上游是**一个 options 对象**（{ schema, label }）:
+            //   const audits = await agent(\"审计 \" + file, { label: file })
+            //   await agent(\"...\", { schema: { type: \"object\" } })
+            // 所以这里做一次适配, 把 options 拆成宿主那三个**位置参数**。
+            // 不在 Kotlin 侧直接读 args[1] 的字段: 那要依赖 quickjs-kt 把 JS 对象转成什么类型,
+            // 属于实现细节; 在 JS 侧拆则是规约本身, 而且 schema 的 JSON 化只有 JS 侧最方便。
+            "globalThis.agent = function (prompt, options) {",
+            "  options = options || {};",
+            "  var schema = options.schema;",
+            "  var schemaJson = (schema === undefined || schema === null) ? null : JSON.stringify(schema);",
+            "  var label = options.label;",
+            "  label = (label === undefined || label === null) ? null : String(label);",
+            "  return globalThis.__rheAgent(String(prompt), schemaJson, label);",
+            "};",
             "(async () => {",
             "  try {",
             "    globalThis.__rheResult = await (async () => {",
@@ -181,6 +198,7 @@ class WorkflowRuntime(
             "  done: globalThis.__rheDone,",
             "  hasResult: globalThis.__rheResult !== undefined && globalThis.__rheResult !== null,",
             "  result: globalThis.__rheResult === undefined ? \"<undef>\" : globalThis.__rheResult,",
+            "  hasError: globalThis.__rheError !== undefined && globalThis.__rheError !== null,",
             "  error: globalThis.__rheError,",
             "  args: typeof globalThis.args,",
             "  agentType: typeof globalThis.agent",
@@ -192,7 +210,9 @@ class WorkflowRuntime(
             "globalThis.__rheDone !== true ? null : JSON.stringify({",
             "  hasResult: globalThis.__rheResult !== undefined && globalThis.__rheResult !== null,",
             "  result: globalThis.__rheResult === undefined ? null : globalThis.__rheResult,",
-            "  error: globalThis.__rheError === null ? null : globalThis.__rheError",
+            // hasError 必须是**真正的布尔**: 只有它能区分"没有错"与"错误信息恰好是字符串 null"
+            "  hasError: globalThis.__rheError !== undefined && globalThis.__rheError !== null,",
+            "  error: globalThis.__rheError === undefined ? null : globalThis.__rheError",
             "})",
         ).joinToString("\n")
     }
