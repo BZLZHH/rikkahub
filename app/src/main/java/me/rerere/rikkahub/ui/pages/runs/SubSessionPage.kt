@@ -32,6 +32,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -274,27 +276,23 @@ private fun MessageBlock(message: UIMessage) {
         MessageRole.TOOL -> "工具结果" to MaterialTheme.colorScheme.secondary
         MessageRole.SYSTEM -> "系统" to MaterialTheme.colorScheme.outline
     }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        // 左侧角色色条: 一屏里能立刻分出"谁在说话"
-        Box(
-            Modifier
-                .width(3.dp)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(2.dp))
-                .background(tint.copy(alpha = 0.55f)),
+    // 左侧角色色条用 drawBehind: 一屏里能立刻分出"谁在说话"。
+    // 不用"fillMaxHeight 的 Box + IntrinsicSize" —— 消息里可能包含任何渲染器,
+    // 一旦它对 intrinsic 测量不友好（SubcomposeLayout / AndroidView）, 整页就会崩。
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawBehind { drawRect(color = tint.copy(alpha = 0.55f), size = Size(3.dp.toPx(), size.height)) }
+            .padding(start = 11.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = tint,
         )
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = tint,
-            )
-            message.parts.forEach { part -> PartBlock(part) }
-        }
+        message.parts.forEach { part -> PartBlock(part) }
     }
 }
 

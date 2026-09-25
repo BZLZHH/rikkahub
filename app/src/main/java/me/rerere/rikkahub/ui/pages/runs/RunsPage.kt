@@ -28,6 +28,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontFamily
@@ -179,13 +181,15 @@ private fun RunRowCard(row: RunRow, onClick: () -> Unit) {
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Row(Modifier.height(IntrinsicSize.Min)) {
-            // 左侧状态条: 扫一眼就知道哪条在跑, 不必读文字
-            Box(Modifier.width(4.dp).fillMaxHeight().background(accent))
-            Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
+        // 左侧状态条用 drawBehind 画, 而不是"一个 fillMaxHeight 的 Box + IntrinsicSize":
+        // 后者要为整张卡做 intrinsic 测量, 而卡片里将来放任何 SubcomposeLayout 就会崩。
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .drawBehind { drawRect(color = accent, size = Size(4.dp.toPx(), size.height)) }
+                .padding(start = 18.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -221,9 +225,8 @@ private fun RunRowCard(row: RunRow, onClick: () -> Unit) {
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

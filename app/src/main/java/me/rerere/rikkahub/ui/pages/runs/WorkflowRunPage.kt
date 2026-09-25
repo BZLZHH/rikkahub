@@ -125,7 +125,9 @@ fun WorkflowRunPage(runId: String) {
                 )
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            Row(Modifier.fillMaxSize().height(IntrinsicSize.Min)) {
+            // 刻意**不**用 IntrinsicSize: 右栏是 LazyColumn, 对它做 intrinsic 测量会抛异常。
+            // 左栏用 fillMaxHeight 撑满即可 —— Row 的高度由 fillMaxSize 定, 是确定的。
+            Row(Modifier.fillMaxSize()) {
                 PhaseRail(
                     phases = phaseNames,
                     ungroupedCount = if (showUngrouped && phaseNames.isNotEmpty()) ungrouped.size else null,
