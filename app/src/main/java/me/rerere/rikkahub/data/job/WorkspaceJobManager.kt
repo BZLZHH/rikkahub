@@ -329,21 +329,16 @@ class WorkspaceJobManager(
         workspace: WorkspaceEntity,
         command: String,
         env: Map<String, String>,
-        skipQuotaCheck: Boolean = false,
     ): WorkspaceJobEntity {
-        val record = job.toRunRecord().copy(
-            status = RunStatus.RUNNING,
-            startedAt = System.currentTimeMillis(),
-            maxRuntimeMs = job.maxRuntimeMs,
-        )
         // 配额必须在起进程之前判: 以前是 checkQuota() 直接 require, 调用方(job_* 工具、调度器)
         // 依赖这个抛错来上报; 现在判定逻辑统一在编排层, 但语义保持不变。
         if (!orchestrator.canStart(RunKind.JOB, job.workspaceId)) {
             error(orchestrator.quotaMessage(RunKind.JOB, job.workspaceId))
         }
         val started = launchProcess(job, workspace, command, env)
-        // 起好了再记账 + 挂句柄看护（配额上面已判）
-        orchestrator.attachExisting(record) { handleFor(started.id) }
+        // 记账要在**起好之后**: RunRecord 直接取真实实体的状态与起始时间, 不靠假设。
+        // 若起进程就失败了, launchProcess 已把 FAILED 落库, 这里 attach 到的也是真实结果。
+        orchestrator.attachExisting(started.toRunRecord()) { handleFor(started.id) }
         return started
     }
 

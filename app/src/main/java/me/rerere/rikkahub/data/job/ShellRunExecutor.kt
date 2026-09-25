@@ -26,7 +26,7 @@ internal class ShellRunExecutor(
     override val kind: RunKind = RunKind.JOB
 
     override suspend fun launch(active: ActiveRun, registry: RunRegistry): RunLaunchResult {
-        val started = runCatching { manager.launchFromOrchestrator(active.record, skipQuotaCheck = true) }
+        val started = runCatching { manager.launchFromOrchestrator(active.record) }
             .getOrElse { return RunLaunchResult.NotStarted(it.message ?: "failed to start process") }
         val handle = manager.handleFor(started.id)
             ?: return RunLaunchResult.NotStarted("process vanished right after start")
