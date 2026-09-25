@@ -15,8 +15,8 @@ It ships under its own application ID and version line, so it can be installed a
 | | |
 |---|---|
 | Application ID | `me.rerere.rikkahub.enhanced` |
-| Current version | `2.5.2-rhe.1.0` (versionCode `187001`) |
-| Upstream baseline | RikkaHub `2.5.2` (versionCode `187`) |
+| Current version | `2.5.4-rhe.1.0` (versionCode `189001`) |
+| Upstream baseline | RikkaHub `2.5.4` (versionCode `189`) |
 | License | AGPL-3.0 |
 
 ## What this fork adds
@@ -66,7 +66,8 @@ building release variants.
 
 This is a fork and is neither affiliated with nor endorsed by the RikkaHub project. Upstream code is the
 foundation of this repository; all credit for the original work belongs to the RikkaHub authors.
-Fork-specific issues should be reported here rather than upstream.
+Fork-specific issues should be reported here rather than upstream; upstream itself does not accept pull
+requests, so changes are carried here as a fork.
 
 ## License
 

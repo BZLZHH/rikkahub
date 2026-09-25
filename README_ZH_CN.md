@@ -15,8 +15,8 @@ RikkaHub Enhanced 跟随上游 RikkaHub，并针对**长时间无人值守运行
 | | |
 |---|---|
 | 应用 ID | `me.rerere.rikkahub.enhanced` |
-| 当前版本 | `2.5.2-rhe.1.0`（versionCode `187001`） |
-| 上游基线 | RikkaHub `2.5.2`（versionCode `187`） |
+| 当前版本 | `2.5.4-rhe.1.0`（versionCode `189001`） |
+| 上游基线 | RikkaHub `2.5.4`（versionCode `189`） |
 | 许可证 | AGPL-3.0 |
 
 ## 相比上游新增
@@ -60,7 +60,7 @@ adb install -r app-universal-release.apk
 ## 与上游的关系
 
 本项目是分支，与 RikkaHub 项目无从属或背书关系。上游代码是本仓库的基础，原始工作成果归 RikkaHub 作者所有。
-仅与本分支相关的问题请提交到本仓库，而非上游。
+仅与本分支相关的问题请提交到本仓库，而非上游；上游不接受 Pull Request，因此改动以分支形式维护在本仓库。
 
 ## 许可证
 

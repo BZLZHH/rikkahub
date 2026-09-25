@@ -28,14 +28,14 @@ android {
         minSdk = 26
         targetSdk = 37
         // 版本号体系: 保留上游基线 + RHE 独立版本
-        //   versionCode = 上游 versionCode * 1000 + RHE build  (187 * 1000 + 1 = 187001, 单调递增)
-        //   versionName = <上游版本>-rhe.<RHE 版本>             (2.5.2-rhe.1.0, 语义化可比较)
-        versionCode = 187001
-        versionName = "2.5.2-rhe.1.0"
+        //   versionCode = 上游 versionCode * 1000 + RHE build  (189 * 1000 + 1 = 189001, 单调递增)
+        //   versionName = <上游版本>-rhe.<RHE 版本>             (2.5.4-rhe.1.0, 语义化可比较)
+        versionCode = 189001
+        versionName = "2.5.4-rhe.1.0"
 
         // 供 About 页同时展示两套版本号
-        buildConfigField("String", "UPSTREAM_VERSION_NAME", "\"2.5.2\"")
-        buildConfigField("String", "UPSTREAM_VERSION_CODE", "\"187\"")
+        buildConfigField("String", "UPSTREAM_VERSION_NAME", "\"2.5.4\"")
+        buildConfigField("String", "UPSTREAM_VERSION_CODE", "\"189\"")
         buildConfigField("String", "RHE_VERSION_NAME", "\"1.0\"")
         buildConfigField("String", "RHE_VERSION_CODE", "\"1\"")
 
