@@ -4,6 +4,9 @@ import com.dokar.quickjs.binding.asyncFunction
 import com.dokar.quickjs.binding.function
 import com.dokar.quickjs.quickJs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -23,20 +26,32 @@ fun interface WorkflowAgentHandler {
     suspend fun run(prompt: String, schemaJson: String?, label: String?): String?
 }
 
-/** 运行时的进度回调（阶段 / 日志）。 */
+/** 运行时的进度回调（阶段 / 日志 / agent 计数）。 */
 interface WorkflowProgressSink {
     fun onPhase(title: String)
     fun onLog(message: String, level: String)
+
+    /** agent 计数变化。默认空实现, 免得每个调用方都被迫实现它。 */
+    fun onAgentProgress(started: Int, reused: Int) {}
 }
 
 /** 一次脚本执行的结果。 */
 data class WorkflowExecutionResult(
     val ok: Boolean,
-    /** 脚本 `return` 的值（JSON 文本）; 失败时为 null */
+    /** 脚本 return 的值（JSON 文本）; 失败时为 null */
     val resultJson: String?,
     /** 失败原因 */
     val error: String?,
+    /** 这次运行里 agent 的调用次数与其中复用了存档的次数（可恢复性的可观测证据） */
+    val agentsCalled: Int = 0,
+    val agentsReused: Int = 0,
 )
+
+/** 超出了单次运行的硬上限（agent 调用总数等）。 */
+class WorkflowLimitException(message: String) : RuntimeException(message)
+
+/** 结构化输出重试耗尽。 */
+class WorkflowSchemaException(message: String) : RuntimeException(message)
 
 /**
  * workflow 脚本的运行时。
@@ -46,39 +61,56 @@ data class WorkflowExecutionResult(
  * - 但 evaluate 会在"await 之后的 JS 续体"执行前返回（实测返回 <pending>）;
  * - 所以: 脚本把结果写进 globalThis, 宿主**再求值一次**即可读到 —— 不需要自己搭事件循环。
  *
- * 脚本内禁掉 Date.now() / Math.random() / 无参 new Date():
- * 可恢复性依赖"重跑产生同样的 agent 调用", 时间与随机数会破坏这个前提。
+ * 脚本的 JS 侧适配（agent/pipeline/parallel/护栏）全在 [WorkflowScriptPrelude] 里。
+ *
+ * 并发**不按脚本的扇出方式限流**, 而是在 agent 闸门（[agentConcurrency]）里统一排队:
+ * 无论脚本用 pipeline、parallel 还是手写 Promise.all, 实际同时在跑的 agent 数都一样。
  */
 class WorkflowRuntime(
     private val agentHandler: WorkflowAgentHandler,
     private val progress: WorkflowProgressSink? = null,
     /** 整个脚本的执行上限 */
     private val timeoutMillis: Long = DEFAULT_TIMEOUT_MS,
+    /** 可恢复: 按"脚本指纹 + 调用序号"复用上一趟已完成的 agent 结果; null = 不复用 */
+    private val journal: WorkflowJournal? = null,
+    /** 同时在跑的 agent 数上限（由调用方按用户配的子代理并发传入） */
+    private val agentConcurrency: Int = DEFAULT_AGENT_CONCURRENCY,
+    private val maxAgents: Int = WorkflowLimits.MAX_AGENTS_PER_RUN,
+    private val maxSchemaAttempts: Int = WorkflowLimits.MAX_SCHEMA_ATTEMPTS,
 ) {
 
     suspend fun execute(
         script: WorkflowScript,
-        args: Map<String, String> = emptyMap(),
-    ): WorkflowExecutionResult = runCatching {
-        val argsJson = JsonInstant.encodeToString(args)
-        val argsLiteral = JsonPrimitive(argsJson).toString()
-        val wrapped = wrap(script.body, argsLiteral)
+        args: JsonElement = JsonObject(emptyMap()),
+    ): WorkflowExecutionResult {
+        val session = WorkflowCallSession(script.fingerprint)
+        val gate = Semaphore(agentConcurrency.coerceAtLeast(1))
+        return runCatching {
+            val argsLiteral = JsonPrimitive(args.toString()).toString()
+            val wrapped = WorkflowScriptPrelude.wrap(script.body, argsLiteral)
 
-        val outcome = quickJs {
-            installHostApi()
-            // 第一趟: 触发脚本; 宿主 async 绑定会在这一趟里跑完。
-            // 注意这里**只跑一次** —— 若在轮询里反复求值整段脚本,
-            // 脚本体（含它里面的 agent 调用）会被重复执行, 那是灾难性的。
-            evaluate<String?>(wrapped)
-            // 之后只读状态, 直到 await 之后的续体把结果写好
-            awaitDone()
+            val outcome = quickJs {
+                installHostApi(session, gate)
+                // 第一趟: 触发脚本; 宿主 async 绑定会在这一趟里跑完。
+                // 注意这里**只跑一次** —— 若在轮询里反复求值整段脚本,
+                // 脚本体（含它里面的 agent 调用）会被重复执行, 那是灾难性的。
+                evaluate<String?>(wrapped)
+                // 之后只读状态, 直到 await 之后的续体把结果写好
+                awaitDone()
+            }
+            parseOutcome(outcome, session)
+        }.getOrElse { error ->
+            WorkflowExecutionResult(
+                ok = false,
+                resultJson = null,
+                error = describe(error),
+                agentsCalled = session.total,
+                agentsReused = session.reused.get(),
+            )
         }
-        parseOutcome(outcome)
-    }.getOrElse { error ->
-        WorkflowExecutionResult(false, null, error.message ?: error::class.java.simpleName)
     }
 
-    private fun com.dokar.quickjs.QuickJs.installHostApi() {
+    private fun com.dokar.quickjs.QuickJs.installHostApi(session: WorkflowCallSession, gate: Semaphore) {
         function("__rhePhase") { args: Array<Any?> ->
             progress?.onPhase(args.getOrNull(0) as? String ?: "")
         }
@@ -88,12 +120,124 @@ class WorkflowRuntime(
                 args.getOrNull(1) as? String ?: "log",
             )
         }
+        // 位置参数（prompt, schemaJson, label）是宿主与 JS 适配层之间的约定;
+        // 脚本看到的是上游的 agent(prompt, options) —— 拆选项在 WorkflowScriptPrelude 里做。
         asyncFunction<String?>("__rheAgent") { args: Array<Any?> ->
             val prompt = args.getOrNull(0) as? String ?: return@asyncFunction null
-            val schemaJson = args.getOrNull(1) as? String
-            val label = args.getOrNull(2) as? String
-            agentHandler.run(prompt, schemaJson, label)
+            val schemaJson = (args.getOrNull(1) as? String)?.takeIf { it.isNotBlank() }
+            val label = (args.getOrNull(2) as? String)?.takeIf { it.isNotBlank() }
+            runAgentCall(session, gate, prompt, schemaJson, label)
         }
+    }
+
+    /** 一次 agent 调用的完整语义: 序号 -> 复用 -> 排队 -> 结构化输出 -> 存档。 */
+    private suspend fun runAgentCall(
+        session: WorkflowCallSession,
+        gate: Semaphore,
+        prompt: String,
+        schemaJson: String?,
+        label: String?,
+    ): String? {
+        val index = session.nextIndex()
+        if (index >= maxAgents) {
+            throw WorkflowLimitException(
+                "workflow exceeded " + maxAgents + " agent calls in one run"
+            )
+        }
+        progress?.onAgentProgress(session.total, session.reused.get())
+
+        recall(session, index, prompt, schemaJson, label)?.let { return it }
+
+        val text = gate.withPermit { invokeAgent(index, prompt, schemaJson, label) }
+        if (text == null) {
+            // 被停止或不可恢复错误: 上游约定 agent() 返回 null, 且**不存档** ——
+            // 下一趟重跑必须重做它（"still running when you stopped: starts over"）。
+            session.stopReuseFrom(index)
+            progress?.onLog("agent #" + index + " 没有产出（被停止或不可恢复错误）", "warn")
+            return null
+        }
+        journal?.remember(
+            session.fingerprint,
+            WorkflowAgentRecord(index, prompt, schemaJson, label, text),
+        )
+        return text
+    }
+
+    /**
+     * 尝试复用存档。
+     *
+     * 三条不复用的理由, 任何一条成立都要**从这个序号起**放弃复用（前缀式重放）:
+     * 1. 存档里没有这个序号（上一趟没跑到这么远）;
+     * 2. 提示词或 schema 与存档不一致（脚本改了, 或前面的结果变了）;
+     * 3. 更早的调用已经失败过（resumeBarrier 已提前）。
+     */
+    private suspend fun recall(
+        session: WorkflowCallSession,
+        index: Int,
+        prompt: String,
+        schemaJson: String?,
+        label: String?,
+    ): String? {
+        val journal = journal ?: return null
+        if (index >= session.resumeBarrier) return null
+
+        val record = journal.recall(session.fingerprint, index)
+        if (record == null || record.prompt != prompt || record.schemaJson != schemaJson) {
+            session.stopReuseFrom(index)
+            return null
+        }
+        session.reused.incrementAndGet()
+        progress?.onAgentProgress(session.total, session.reused.get())
+        progress?.onLog(
+            "agent #" + index + " 复用上一趟的结果" + if (label != null) "（" + label + "）" else "",
+            "resume",
+        )
+        return record.resultText
+    }
+
+    /**
+     * 真正调用子代理; 带 schema 时负责"附 schema -> 校验 -> 不合规重试"。
+     *
+     * 上游语义: schema 自相矛盾时**在启动子代理之前**就失败（别让它白跑）;
+     * 输出连续 [maxSchemaAttempts] 次不合规则该次调用失败, 错误里带最后一次的失败原因。
+     */
+    private suspend fun invokeAgent(
+        index: Int,
+        prompt: String,
+        schemaJson: String?,
+        label: String?,
+    ): String? {
+        if (schemaJson == null) return agentHandler.run(prompt, null, label)
+
+        val schema = WorkflowStructuredOutput.parseLoosely(schemaJson) as? JsonObject
+        if (schema == null) {
+            progress?.onLog("agent #" + index + " 的 schema 不是 JSON 对象, 跳过校验", "warn")
+            return agentHandler.run(WorkflowStructuredOutput.structuredPrompt(prompt, schemaJson), null, label)
+        }
+        WorkflowStructuredOutput.checkSchema(schema)?.let { throw WorkflowSchemaException(it) }
+
+        var lastFailure: String? = null
+        var currentPrompt = WorkflowStructuredOutput.structuredPrompt(prompt, schemaJson)
+        repeat(maxSchemaAttempts) { attempt ->
+            val text = agentHandler.run(currentPrompt, schemaJson, label) ?: return null
+            val parsed = WorkflowStructuredOutput.parseLoosely(text)
+            val failure = if (parsed == null) {
+                "输出不是合法 JSON"
+            } else {
+                WorkflowStructuredOutput.validate(schema, parsed)
+            }
+            if (failure == null) return parsed.toString()
+
+            lastFailure = failure
+            progress?.onLog(
+                "agent #" + index + " 第 " + (attempt + 1) + " 次输出不合规: " + failure,
+                "warn",
+            )
+            currentPrompt = WorkflowStructuredOutput.correctivePrompt(prompt, schemaJson, failure)
+        }
+        throw WorkflowSchemaException(
+            "structured output failed after " + maxSchemaAttempts + " attempts; last failure: " + lastFailure
+        )
     }
 
     /**
@@ -116,13 +260,15 @@ class WorkflowRuntime(
         return null
     }
 
-    private fun parseOutcome(outcome: String?): WorkflowExecutionResult {
+    private fun parseOutcome(outcome: String?, session: WorkflowCallSession): WorkflowExecutionResult {
         if (outcome == null) {
             // 超时信息里带上现场: 只说 "timed out" 对排查毫无帮助
             return WorkflowExecutionResult(
                 ok = false,
                 resultJson = null,
                 error = "workflow timed out; last state = " + (DIAGNOSTIC ?: "<never read>"),
+                agentsCalled = session.total,
+                agentsReused = session.reused.get(),
             )
         }
         val obj = runCatching {
@@ -137,51 +283,30 @@ class WorkflowRuntime(
         val hasError = (obj["hasError"] as? JsonPrimitive)?.booleanOrNull == true
         if (hasError) {
             val message = (obj["error"] as? JsonPrimitive)?.contentOrNull
-            return WorkflowExecutionResult(false, null, message ?: "workflow failed")
+            return WorkflowExecutionResult(
+                ok = false,
+                resultJson = null,
+                error = message ?: "workflow failed",
+                agentsCalled = session.total,
+                agentsReused = session.reused.get(),
+            )
         }
         val hasResult = (obj["hasResult"] as? JsonPrimitive)?.booleanOrNull == true
         return WorkflowExecutionResult(
             ok = true,
             resultJson = if (hasResult) obj["result"]?.toString() else null,
             error = null,
+            agentsCalled = session.total,
+            agentsReused = session.reused.get(),
         )
     }
 
-    private fun wrap(body: String, argsLiteral: String): String {
-        val lines = listOf(
-            "globalThis.args = JSON.parse($argsLiteral);",
-            "globalThis.__rheDone = false; globalThis.__rheResult = null; globalThis.__rheError = null;",
-            "globalThis.phase = globalThis.__rhePhase;",
-            "globalThis.log = globalThis.__rheLog;",
-            // agent(prompt, options) —— 上游是**一个 options 对象**（{ schema, label }）:
-            //   const audits = await agent(\"审计 \" + file, { label: file })
-            //   await agent(\"...\", { schema: { type: \"object\" } })
-            // 所以这里做一次适配, 把 options 拆成宿主那三个**位置参数**。
-            // 不在 Kotlin 侧直接读 args[1] 的字段: 那要依赖 quickjs-kt 把 JS 对象转成什么类型,
-            // 属于实现细节; 在 JS 侧拆则是规约本身, 而且 schema 的 JSON 化只有 JS 侧最方便。
-            "globalThis.agent = function (prompt, options) {",
-            "  options = options || {};",
-            "  var schema = options.schema;",
-            "  var schemaJson = (schema === undefined || schema === null) ? null : JSON.stringify(schema);",
-            "  var label = options.label;",
-            "  label = (label === undefined || label === null) ? null : String(label);",
-            "  return globalThis.__rheAgent(String(prompt), schemaJson, label);",
-            "};",
-            "(async () => {",
-            "  try {",
-            "    globalThis.__rheResult = await (async () => {",
-            "      " + body.trim(),
-            "    })();",
-            "  } catch (e) {",
-            "    globalThis.__rheError = String((e && e.message) || e);",
-            "  } finally {",
-            "    globalThis.__rheDone = true;",
-            "  }",
-            "})();",
-            "null",
-        )
-        return lines.joinToString("\n")
-    }
+    /**
+     * 失败原因要**永不落空**: 早先写成 message ?: javaClass.simpleName,
+     * 而匿名类的 simpleName 是空串, 于是失败信息可能是一句空话。
+     */
+    private fun describe(error: Throwable): String =
+        error.message?.takeIf { it.isNotBlank() } ?: error::class.java.name
 
     /** 超时诊断: 最后一次看到的状态（单元测试与真机排查都用它）。 */
     @Volatile
@@ -191,6 +316,9 @@ class WorkflowRuntime(
     companion object {
         const val DEFAULT_TIMEOUT_MS = 60L * 60 * 1000
         const val POLL_INTERVAL_MS = 50L
+
+        /** 默认的 agent 并发; 调用方一般会按用户设置覆盖它。 */
+        const val DEFAULT_AGENT_CONCURRENCY = 2
 
         /** 超时时用: 把三个 globalThis 标志原样报出来。 */
         private val DIAGNOSE = listOf(

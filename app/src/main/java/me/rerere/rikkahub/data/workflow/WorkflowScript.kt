@@ -58,6 +58,25 @@ object WorkflowScriptParser {
         )
     }
 
+    /**
+     * 动态 import() 的静态探测。
+     *
+     * 上游行为: 脚本里出现 import() 就在**启动前**失败, 因为没有模块加载器 ——
+     * 我们同样不给脚本加载模块的能力（要用库就让 agent 去用）。
+     * 在这里拦而不是等运行时抛: 早失败能省掉一次白跑的 agent。
+     * 只看 import 后跟左括号的形式; 静态 import 语句本来就过不了脚本求值（不是模块）。
+     */
+    private val DYNAMIC_IMPORT = Regex("""\bimport\s*\(""")
+
+    /** 启动前的静态体检; 返回 null 表示可以跑, 否则是不能跑的原因。 */
+    fun rejectionOf(script: WorkflowScript): String? {
+        if (DYNAMIC_IMPORT.containsMatchIn(script.body)) {
+            return "workflow scripts cannot load modules: import() is not available. " +
+                "Put the work that needs a library into an agent task instead."
+        }
+        return null
+    }
+
     private fun parseMeta(literal: String): WorkflowMeta? {
         val name = NAME_PATTERN.find(literal)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
             ?: return null

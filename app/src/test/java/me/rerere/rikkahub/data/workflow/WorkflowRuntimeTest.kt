@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.workflow
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -78,10 +80,12 @@ class WorkflowRuntimeTest {
             "await agent(\"P\", { schema: { type: \"object\" }, label: \"L\" })\nreturn 0",
         )
         val r = runtime(onAgent = { p, s, l ->
-            seenPrompt = p; seenSchema = s; seenLabel = l; "x"
+            // 带 schema 时输出必须是合法 JSON, 否则会走重试（见 invokeAgent）
+            seenPrompt = p; seenSchema = s; seenLabel = l; "{}"
         }).execute(script)
-        assertTrue(r.ok)
-        assertEquals("P", seenPrompt)
+        assertTrue("应成功: " + show(r.error), r.ok)
+        // 提示词会被**追加** schema 说明（"输出要求: 只输出一个 JSON 值..."）, 但原始指令仍在开头
+        assertTrue("原始指令应保留: " + seenPrompt, seenPrompt!!.startsWith("P"))
         assertTrue("schema 应以 JSON 文本传入: " + seenSchema, seenSchema != null && seenSchema!!.contains("object"))
         assertEquals("L", seenLabel)
     }
@@ -100,7 +104,9 @@ class WorkflowRuntimeTest {
     @Test
     fun argsAreInjected() = runBlocking {
         val script = WorkflowScriptParser.parse("return args.who")
-        val r = runtime().execute(script, mapOf("who" to "rhe"))
+        // args 是**结构化**的（上游: "Claude passes the list as structured data"）,
+        // 所以脚本可以直接用数组/对象方法, 不需要自己 JSON.parse。
+        val r = runtime().execute(script, buildJsonObject { put("who", "rhe") })
         assertTrue("应成功: " + show(r.error), r.ok)
         assertTrue("args 应可用: " + r.resultJson, r.resultJson!!.contains("rhe"))
     }

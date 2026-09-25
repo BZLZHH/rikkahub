@@ -94,6 +94,18 @@ class WorkflowScriptParserTest {
     }
 
     @Test
+    fun dynamicImportIsRejectedBeforeTheRun() {
+        val withImport = WorkflowScriptParser.parse("const m = await import(\"fs\")\nreturn m")
+        assertNotNull(
+            "含 import() 的脚本应在启动前被拒（没有模块加载器）",
+            WorkflowScriptParser.rejectionOf(withImport),
+        )
+
+        val withoutImport = WorkflowScriptParser.parse("const x = await agent(\"hi\")\nreturn x")
+        assertNull(WorkflowScriptParser.rejectionOf(withoutImport))
+    }
+
+    @Test
     fun fingerprintChangesWhenContentChanges() {
         val a = "const y = 1"
         val c = "const y = 2"
