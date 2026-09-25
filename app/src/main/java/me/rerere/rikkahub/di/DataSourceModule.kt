@@ -103,9 +103,6 @@ val dataSourceModule = module {
         get<AppDatabase>().agentRunDao()
     }
 
-    single<me.rerere.rikkahub.data.db.dao.WorkflowDAO> {
-        get<AppDatabase>().workflowDao()
-    }
 
     single {
         get<AppDatabase>().folderDao()

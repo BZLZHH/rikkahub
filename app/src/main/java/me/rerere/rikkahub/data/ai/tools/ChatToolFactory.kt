@@ -44,9 +44,6 @@ class ChatToolFactory(
     private val agentRunDao: me.rerere.rikkahub.data.db.dao.AgentRunDAO,
     private val agentTranscripts: me.rerere.rikkahub.data.agent.AgentTranscriptStore,
     private val runOrchestrator: me.rerere.rikkahub.data.run.RunOrchestrator,
-    /** 工作流: 多步骤编排（步骤本身是 shell 后台任务） */
-    private val workflowDao: me.rerere.rikkahub.data.db.dao.WorkflowDAO,
-    private val workflowEngine: me.rerere.rikkahub.data.workflow.WorkflowRunEngine,
 ) {
     suspend fun createTools(
         settings: Settings,
@@ -150,13 +147,6 @@ class ChatToolFactory(
                 dao = agentRunDao,
                 transcripts = agentTranscripts,
                 orchestrator = runOrchestrator,
-            ),
-            workflowContext = WorkflowToolContext(
-                workspaceId = workspaceId,
-                conversationId = conversationId,
-                assistantId = assistantId,
-                dao = workflowDao,
-                engine = workflowEngine,
             ),
         )
     }

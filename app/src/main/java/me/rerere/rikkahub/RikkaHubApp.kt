@@ -242,8 +242,6 @@ class RikkaHubApp : Application() {
         get<AppScope>().launch {
             runCatching {
                 get<WorkspaceJobManager>().reconcileOnStart()
-                // 工作流运行也要收敛: 否则流程停在"运行中", 而它的协程早已随进程消失
-                get<me.rerere.rikkahub.data.workflow.WorkflowRunEngine>().reconcile()
                 get<JobScheduleEngine>().rescheduleAll()
             }.onFailure {
                 Log.e(TAG, "initWorkspaceJobs failed", it)

@@ -1526,10 +1526,6 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_background_execution_agents_workspace_desc">同一个工作区里同时最多有多少个子代理在干活。</string>
   <string name="setting_background_execution_note_title">为什么分成两套额度？</string>
   <string name="setting_background_execution_note_desc">shell 任务与子代理分账，所以一条长跑的构建不会把子代理饿死，反之亦然。改动立刻生效；已经在跑的不会受影响。</string>
-  <string name="tool_ui_workflow_create">创建工作流</string>
-  <string name="tool_ui_workflow_run">运行工作流</string>
-  <string name="tool_ui_workflow_status">查看工作流</string>
-  <string name="tool_ui_workflow_kill">停止工作流</string>
   <string name="tool_ui_subagent_start">派出子代理</string>
   <string name="tool_ui_subagent_status">查看子代理</string>
   <string name="tool_ui_subagent_result">读取子代理结果</string>

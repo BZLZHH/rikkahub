@@ -28,7 +28,7 @@ val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_write_file" to false,
     "workspace_edit_file" to false,
     "workspace_shell" to true,
-) + JobToolDefaultApprovals + SubagentToolDefaultApprovals + WorkflowToolDefaultApprovals
+) + JobToolDefaultApprovals + SubagentToolDefaultApprovals
 
 fun resolveWorkspaceToolApproval(name: String, overrides: Map<String, Boolean>): Boolean =
     overrides[name] ?: WorkspaceToolDefaultApprovals[name] ?: false
@@ -41,8 +41,6 @@ suspend fun createWorkspaceTools(
     jobContext: JobToolContext? = null,
     /** 非空时追加 subagent_* 子代理工具（与 job_* 平级的另一种执行体） */
     subagentContext: SubagentToolContext? = null,
-    /** 非空时追加 workflow_* 工作流工具（多步骤编排） */
-    workflowContext: WorkflowToolContext? = null,
 ): List<Tool> {
     if (workspaceId.isNullOrBlank()) return emptyList()
     val approvalOverrides = workspaceRepository.getById(workspaceId)?.toolApprovalOverrides().orEmpty()
@@ -60,9 +58,6 @@ suspend fun createWorkspaceTools(
         }
         if (subagentContext != null) {
             addAll(createSubagentTools(subagentContext, ::needsApproval))
-        }
-        if (workflowContext != null) {
-            addAll(createWorkflowTools(workflowContext, ::needsApproval))
         }
     }
 }
