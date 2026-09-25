@@ -96,6 +96,17 @@ val dataSourceModule = module {
         get<AppDatabase>().workspaceJobDao()
     }
 
+    // 注意: 必须显式声明接口类型。Koin 按**声明类型**注册 —— 若写成 single { db.agentRunDao() },
+    // 它的键就是实现类 AgentRunDAO_Impl, 而注入方要的是 AgentRunDAO 接口, 于是解析失败。
+    // 这两个 DAO 属于 agent / workflow 两个新功能, 漏注册过一次, 真机启动直接崩。
+    single<me.rerere.rikkahub.data.db.dao.AgentRunDAO> {
+        get<AppDatabase>().agentRunDao()
+    }
+
+    single<me.rerere.rikkahub.data.db.dao.WorkflowDAO> {
+        get<AppDatabase>().workflowDao()
+    }
+
     single {
         get<AppDatabase>().folderDao()
     }

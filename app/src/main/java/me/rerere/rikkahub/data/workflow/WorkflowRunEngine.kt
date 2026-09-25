@@ -1,12 +1,12 @@
 package me.rerere.rikkahub.data.workflow
 
 import android.util.Log
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.db.dao.WorkflowDAO
 import me.rerere.rikkahub.data.db.entity.WorkflowEntity
 import me.rerere.rikkahub.data.db.entity.WorkflowRunEntity
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.run.RunStatus
 import me.rerere.rikkahub.utils.JsonInstant
 import java.util.concurrent.ConcurrentHashMap
@@ -26,7 +26,11 @@ sealed interface WorkflowStartResult {
  * 因此"停止整个流程" = 取消这个协程（当前步骤的任务由引擎的取消检查收尾）。
  */
 class WorkflowRunEngine(
-    private val scope: CoroutineScope,
+    /**
+     * 依赖具体类型 AppScope 而不是 CoroutineScope 抽象 —— DI 里 AppScope 是单类型注册的,
+     * 用抽象去 get() 会解析不到（真机启动崩过两次, 别再改成 CoroutineScope）。
+     */
+    private val scope: AppScope,
     private val dao: WorkflowDAO,
     private val runner: WorkflowRunner,
 ) {

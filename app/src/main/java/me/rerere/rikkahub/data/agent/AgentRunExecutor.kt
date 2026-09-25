@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.data.agent
 
 import android.util.Log
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
@@ -10,6 +9,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.db.dao.AgentRunDAO
@@ -34,7 +34,12 @@ private const val TAG = "AgentRunExecutor"
  * shell 要杀进程树, 子代理只需**取消协程** —— 这正是把编排层与执行体分开的理由。
  */
 class AgentRunExecutor(
-    private val scope: CoroutineScope,
+    /**
+     * 依赖具体类型 AppScope 而不是 CoroutineScope —— DI 里是单类型注册, 用抽象 get() 会失败。
+     * 这条路径是**懒加载**的（subagent_start 才构造）, 所以配错不会在启动时崩,
+     * 而是在用户第一次派子代理时才失败 —— 更难发现, 所以更要按类型写对。
+     */
+    private val scope: AppScope,
     private val dao: AgentRunDAO,
     private val runner: AgentRunner,
     private val toolFactory: AgentToolFactory,
