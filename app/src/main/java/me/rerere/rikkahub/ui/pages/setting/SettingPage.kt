@@ -62,6 +62,7 @@ import me.rerere.hugeicons.stroke.Package
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Share04
+import me.rerere.hugeicons.stroke.Rocket01
 import me.rerere.hugeicons.stroke.Sun01
 import me.rerere.hugeicons.stroke.Tiktok
 import me.rerere.hugeicons.stroke.WavingHand01
@@ -183,6 +184,14 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         },
                         headlineContent = { Text(stringResource(R.string.setting_page_color_mode)) },
                         supportingContent = { Text(selectedColorModeText) },
+                    )
+                    item(
+                        // 重跑首次引导: 它只是一道一次性闸门, 把标记翻回去即可 ——
+                        // 不另做一套"重跑"界面, 免得两边逻辑漂移。
+                        onClick = { vm.updateSettings(settings.copy(onboardingCompleted = false)) },
+                        leadingContent = { Icon(HugeIcons.Rocket01, null) },
+                        supportingContent = { Text("重新走一遍模型 / 工作区 / 权限的引导") },
+                        headlineContent = { Text("重新运行首次引导") },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingPreferences) },

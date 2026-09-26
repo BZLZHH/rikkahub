@@ -82,6 +82,42 @@ class RootfsCatalogTest {
     }
 
     @Test
+    fun defaultMirrorIsUstc() {
+        // 用户指定的默认: 国内直连快得多, 而 rootfs 是上百 MB 的下载
+        assertEquals(RootfsMirror.USTC, RootfsCatalog.defaultMirror)
+    }
+
+    @Test
+    fun ustcUrlsReallyPointAtUstc() {
+        RootfsCatalog.arches.forEach { arch ->
+            listOf(RootfsDistro.ARCH, RootfsDistro.UBUNTU).forEach { distro ->
+                val url = RootfsCatalog.url(distro, arch, RootfsMirror.USTC)
+                assertNotNull(url)
+                assertTrue("默认源应当是中科大: " + url, url!!.contains("mirrors.ustc.edu.cn"))
+            }
+        }
+    }
+
+    @Test
+    fun switchingMirrorKeepsTheSameArch() {
+        // 换源只应换主机, 不该把架构也换掉 —— 这正是最容易写错的地方
+        RootfsCatalog.arches.forEach { arch ->
+            val ustc = RootfsCatalog.url(RootfsDistro.ARCH, arch, RootfsMirror.USTC)
+            val official = RootfsCatalog.url(RootfsDistro.ARCH, arch, RootfsMirror.OFFICIAL)
+            assertNotNull(ustc)
+            assertNotNull(official)
+            assertTrue("两个源应当是不同主机", ustc != official)
+            val marker = when (arch) {
+                RootfsCatalog.ARM64 -> "aarch64"
+                RootfsCatalog.ARMFH -> "armv7"
+                else -> "x86_64"
+            }
+            assertTrue("中科大那条架构要留在 " + marker + ": " + ustc, ustc!!.contains(marker))
+            assertTrue("官方那条架构要留在 " + marker + ": " + official, official!!.contains(marker))
+        }
+    }
+
+    @Test
     fun archLabelMentionsTheRealArchName() {
         assertTrue(RootfsCatalog.archLabel(RootfsCatalog.ARM64).contains("aarch64"))
         assertTrue(RootfsCatalog.archLabel(RootfsCatalog.AMD64).contains("x86_64"))
