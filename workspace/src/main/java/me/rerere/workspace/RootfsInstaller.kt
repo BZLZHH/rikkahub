@@ -10,6 +10,7 @@ import java.net.URL
 import java.nio.file.Files
 import java.util.Locale
 import java.util.zip.GZIPInputStream
+import io.airlift.compress.zstd.ZstdInputStream
 import org.tukaani.xz.XZInputStream
 
 class RootfsInstaller(
@@ -391,6 +392,14 @@ class RootfsInstaller(
         },
         TAR_XZ("tar.xz") {
             override fun wrapStream(input: InputStream): InputStream = XZInputStream(input)
+        },
+
+        /**
+         * Arch 官方 x86_64 bootstrap 只发 `.tar.zst`（arm 那边 ArchLinuxARM 仍然是 .tar.gz）。
+         * 少了这一项, "默认装 Arch" 在 x86_64 上就只能失败。
+         */
+        TAR_ZST("tar.zst") {
+            override fun wrapStream(input: InputStream): InputStream = ZstdInputStream(input)
         };
 
         abstract fun wrapStream(input: InputStream): InputStream
@@ -400,6 +409,7 @@ class RootfsInstaller(
                 val path = url.substringBefore('?').substringBefore('#')
                 return when {
                     path.endsWith(".tar.xz") || path.endsWith(".txz") -> TAR_XZ
+                    path.endsWith(".tar.zst") || path.endsWith(".tzst") -> TAR_ZST
                     else -> TAR_GZ
                 }
             }

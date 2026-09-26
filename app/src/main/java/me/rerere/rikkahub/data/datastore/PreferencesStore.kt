@@ -116,6 +116,9 @@ class SettingsStore(
         val NETWORK_SETTING = stringPreferencesKey("network_setting")
         val DEVELOPER_MODE = booleanPreferencesKey("developer_mode")
 
+        /** 首次启动向导是否走完。**只置真、不重置** —— 老用户升级上来时库里没有这个键, 会读成 false。 */
+        val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
+
         // 模型选择
         val FAVORITE_MODELS = stringPreferencesKey("favorite_models")
         val SELECT_MODEL = stringPreferencesKey("chat_model")
@@ -211,6 +214,7 @@ class SettingsStore(
                 preferences[THEME_ID] = settings.themeId
                 preferences[CUSTOM_THEMES] = JsonInstant.encodeToString(settings.customThemes)
                 preferences[DEVELOPER_MODE] = settings.developerMode
+                preferences[ONBOARDING_COMPLETED] = settings.onboardingCompleted
                 preferences[DISPLAY_SETTING] = JsonInstant.encodeToString(settings.displaySetting)
                 preferences[NETWORK_SETTING] = JsonInstant.encodeToString(settings.networkSetting)
 
@@ -326,6 +330,7 @@ class SettingsStore(
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
                 developerMode = preferences[DEVELOPER_MODE] == true,
+                onboardingCompleted = preferences[ONBOARDING_COMPLETED] == true,
                 displaySetting = JsonInstant.decodeFromString(preferences[DISPLAY_SETTING] ?: "{}"),
                 networkSetting = JsonInstant.decodeFromString(preferences[NETWORK_SETTING] ?: "{}"),
                 searchServices = preferences[SEARCH_SERVICES]?.let {
@@ -601,6 +606,8 @@ data class Settings(
     val themeId: String = PresetThemes[0].id,
     val customThemes: List<CustomTheme> = emptyList(),
     val developerMode: Boolean = false,
+    /** 首次启动向导是否走完（见 [SettingsStore.ONBOARDING_COMPLETED]）。 */
+    val onboardingCompleted: Boolean = false,
     val displaySetting: DisplaySetting = DisplaySetting(),
     val networkSetting: NetworkSetting = NetworkSetting(),
     val favoriteModels: List<Uuid> = emptyList(),

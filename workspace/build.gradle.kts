@@ -27,6 +27,7 @@ dependencies {
     implementation(libs.material)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.xz)
+    implementation(libs.aircompressor)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)

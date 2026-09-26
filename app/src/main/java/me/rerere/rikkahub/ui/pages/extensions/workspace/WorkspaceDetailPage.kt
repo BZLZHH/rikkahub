@@ -82,6 +82,7 @@ import me.rerere.hugeicons.stroke.Share08
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.tools.resolveWorkspaceToolApproval
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.workspace.RootfsCatalog
 import androidx.compose.ui.res.stringResource
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -569,7 +570,8 @@ private fun InstallRootfsDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
-    var url by rememberSaveable(workspace.id) { mutableStateOf(DEFAULT_ROOTFS_URL) }
+    // 默认用**设备架构那一份**（原来这里是写死的 arm64, x86_64 设备上必然装错）
+    var url by rememberSaveable(workspace.id) { mutableStateOf(RootfsCatalog.defaultUrl()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -988,5 +990,3 @@ internal fun String.toShellStatusLabel(): String = when (this) {
     else -> lowercase()
 }
 
-private const val DEFAULT_ROOTFS_URL =
-    "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.3-base-arm64.tar.gz"

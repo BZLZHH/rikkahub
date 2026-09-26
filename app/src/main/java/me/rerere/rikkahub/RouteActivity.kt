@@ -86,6 +86,9 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantPromptPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantRequestPage
 import me.rerere.rikkahub.ui.pages.backup.BackupPage
 import me.rerere.rikkahub.ui.pages.chat.ChatPage
+import me.rerere.rikkahub.ui.pages.onboarding.OnboardingPage
+import kotlinx.coroutines.flow.map
+import androidx.compose.runtime.remember
 import me.rerere.rikkahub.ui.pages.runs.RunsPage
 import me.rerere.rikkahub.ui.pages.runs.SubSessionPage
 import me.rerere.rikkahub.ui.pages.runs.WorkflowRunPage
@@ -198,7 +201,19 @@ class RouteActivity : ComponentActivity() {
                         }
                         .build()
                 }
-                AppRoutes()
+                // 首次启动向导 —— 闸门放在这里, 而不是塞进 nav 图:
+                // 它是一次性的前置流程, 不是"又一个页面", 不该出现在返回栈里。
+                //
+                // initialValue 故意给 **true**: DataStore 是异步读的, 给 false 会让
+                // 每个老用户每次冷启动都闪一下向导。读出来是 false 才显示。
+                val onboarded by remember {
+                    settingsStore.settingsFlow.map { it.onboardingCompleted }
+                }.collectAsStateWithLifecycle(initialValue = true)
+                if (onboarded) {
+                    AppRoutes()
+                } else {
+                    OnboardingPage()
+                }
             }
         }
     }
