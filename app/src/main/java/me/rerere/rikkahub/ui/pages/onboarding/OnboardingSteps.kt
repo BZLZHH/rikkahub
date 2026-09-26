@@ -1,8 +1,12 @@
 package me.rerere.rikkahub.ui.pages.onboarding
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,7 +18,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -23,6 +29,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,13 +37,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Cpu
+import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.Zap
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.workspace.RootfsCatalog
 import me.rerere.rikkahub.data.workspace.RootfsDistro
 import me.rerere.rikkahub.data.workspace.RootfsMirror
@@ -49,19 +64,138 @@ import me.rerere.workspace.RootfsInstallStage
 
 @Composable
 fun WelcomeStep() {
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        StepTitle(
-            title = "欢迎使用 RikkaHub",
-            subtitle = "三步把它配成能用的样子。全程可跳过, 之后在设置里都能补。",
-        )
-        Bullet("模型 — 没有它一句话都发不出去, 所以要最先配")
-        Bullet("工作区 — AI 的文件与命令工具都跑在这里面, 缺了会静默失效")
-        Bullet("权限 — 后台任务的通知与保活, 不授权就不会响、也容易被系统掐掉")
-        InfoCard(
-            title = "为什么值得花这两分钟",
-            body = "这几项配齐之后, 后台任务、子代理、定时任务这些东西才会真的可用;" +
-                "跳过也能用, 但它们的失败方式往往是\"什么都不发生\", 很难自己查出来。",
-        )
+    // 整屏错峰入场: 一齐出现会显得很平, 错开一点就有节奏了
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        StaggeredIn(0, shown) {
+            Box(
+                modifier = Modifier
+                    .size(104.dp)
+                    .clip(RoundedCornerShape(30.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primaryContainer,
+                                MaterialTheme.colorScheme.tertiaryContainer,
+                            )
+                        )
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(R.mipmap.ic_launcher_foreground),
+                    contentDescription = null,
+                    modifier = Modifier.size(78.dp),
+                )
+            }
+        }
+
+        StaggeredIn(1, shown) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "RikkaHub Enhanced",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "把 AI 放进你的手机",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            StaggeredIn(2, shown) {
+                FeatureRow(
+                    icon = HugeIcons.Cpu,
+                    title = "任意模型",
+                    caption = "OpenAI · Gemini · DeepSeek, 填个 Key 就能用",
+                )
+            }
+            StaggeredIn(3, shown) {
+                FeatureRow(
+                    icon = HugeIcons.Folder01,
+                    title = "工作区沙箱",
+                    caption = "AI 在里面读写文件、跑命令、跑长任务",
+                )
+            }
+            StaggeredIn(4, shown) {
+                FeatureRow(
+                    icon = HugeIcons.Zap,
+                    title = "自动审批 · 默认开启",
+                    caption = "少点几十次确认, 高危操作仍然会问你",
+                )
+            }
+        }
+    }
+}
+
+/** 错峰入场: index 越大出现越晚, 每档 70ms。 */
+@Composable
+private fun StaggeredIn(index: Int, visible: Boolean, content: @Composable () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(ONBOARD_ANIM_MS, delayMillis = index * 70)) +
+            slideInVertically(tween(ONBOARD_ANIM_MS, delayMillis = index * 70)) { height -> height / 5 },
+    ) {
+        content()
+    }
+}
+
+/** 一行"图标 + 标题 + 说明"。比纯文字列表显著得多, 也不用读一整段。 */
+@Composable
+private fun FeatureRow(icon: ImageVector, title: String, caption: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = caption,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
@@ -208,6 +342,8 @@ fun WorkspaceStep(
     url: String?,
     installing: Boolean,
     progress: RootfsInstallProgress?,
+    autoApproval: Boolean,
+    onAutoApprovalChange: (Boolean) -> Unit,
     error: String?,
     onSkipInstall: () -> Unit,
 ) {
@@ -216,6 +352,11 @@ fun WorkspaceStep(
             title = "创建工作区",
             subtitle = "AI 读写文件、跑命令都在这个沙箱里。没有它, 那些工具会静默失效。",
         )
+
+        // 显著位置 + 默认开启: 用户指定。
+        // 它决定"每次调用工具都要不要人工点一下确认" —— 不勾的话第一次用会连着弹几十次,
+        // 而很多人根本不知道有这个开关, 只会觉得"这 App 怎么老弹窗"。
+        AutoApprovalCard(checked = autoApproval, onCheckedChange = onAutoApprovalChange)
 
         OutlinedTextField(
             value = name,
@@ -328,6 +469,70 @@ fun WorkspaceStep(
 
         if (!installing) {
             TextButton(onClick = onSkipInstall) { Text("跳过安装, 只建工作区") }
+        }
+    }
+}
+
+@Composable
+private fun AutoApprovalCard(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = if (checked) {
+            MaterialTheme.colorScheme.tertiaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        if (checked) {
+                            MaterialTheme.colorScheme.tertiary
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHighest
+                        }
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Zap,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = if (checked) {
+                        MaterialTheme.colorScheme.onTertiary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = "自动审批" + if (checked) " · 已开启" else " · 已关闭",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = if (checked) {
+                        "AI 调用工具时由模型代为判断, 不再逐条弹窗; 删除/覆盖这类高危操作仍然会问你。"
+                    } else {
+                        "每次调用工具都要你手动确认。第一次用会连着弹很多次。"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
     }
 }

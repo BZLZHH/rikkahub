@@ -100,6 +100,9 @@ fun OnboardingPage() {
     var installing by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf<RootfsInstallProgress?>(null) }
     var wsError by remember { mutableStateOf<String?>(null) }
+    // 自动审批: 用户指定**默认开启**。它落进 settings.autoApprovalEnabled, 判定模型走
+    // fastModelId 兜底 —— 而第 1 步刚好把 fastModelId 指向了新配的模型, 所以勾上就真的生效。
+    var autoApproval by rememberSaveable { mutableStateOf(true) }
     var installJob by remember { mutableStateOf<Job?>(null) }
 
     // 权限（真实系统状态, 不是我们自己记的标记）
@@ -196,6 +199,7 @@ fun OnboardingPage() {
             }
             val uuid = workspaceId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
             withModel.copy(
+                autoApprovalEnabled = autoApproval,
                 assistants = if (uuid == null) {
                     withModel.assistants
                 } else {
@@ -293,6 +297,8 @@ fun OnboardingPage() {
                     installing = installing,
                     progress = progress,
                     error = wsError,
+                    autoApproval = autoApproval,
+                    onAutoApprovalChange = { autoApproval = it },
                     onSkipInstall = { createOnly() },
                 )
 
@@ -328,6 +334,7 @@ fun OnboardingPage() {
                     rows = listOf(
                         "模型" to if (apiKey.isNotBlank()) preset.label + " · " + modelId.ifBlank { preset.modelId } else "未配置",
                         "工作区" to (createdName ?: "未创建"),
+                        "自动审批" to if (autoApproval) "已开启" else "已关闭",
                         "Linux 环境" to if (installed) "已安装" else "未安装",
                         "通知" to if (notifGranted) "已授权" else "未授权",
                         "后台白名单" to if (batteryExempt) "已加入" else "未加入",
