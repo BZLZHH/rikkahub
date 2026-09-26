@@ -37,8 +37,25 @@ class AgentToolFactory(
             workspaceCwd = cwd,
             conversationId = conversationId,
         )
-        return AgentToolPolicy
-            .filter(all, groups, excludeJobTools)
-            .map { it.copy(needsApproval = { false }) }
+        return prepareAgentTools(all, groups, excludeJobTools)
     }
 }
+
+/**
+ * 白名单过滤 + **一律免审批**。
+ *
+ * 抽成独立函数是为了能单独测: 上面那个方法要一个真的 `ChatToolFactory`（拖着半个 DI 图）才跑得起来,
+ * 而真正需要被锁住的语义只有两条 ——
+ * 1. 不该给的工具一个都不给（[AgentToolPolicy] 负责）;
+ * 2. 剩下的**全部**把 `needsApproval` 关掉。
+ *
+ * 第 2 条是**死锁防线**: 子代理没有 UI 通道, 只要有任何一个工具停在 Pending 等人工确认,
+ * 那个子代理就永远醒不过来了。所以这条必须对每个工具都成立, 不能有例外。
+ */
+internal fun prepareAgentTools(
+    all: List<Tool>,
+    groups: Set<AgentToolGroup>,
+    excludeJobTools: Boolean,
+): List<Tool> = AgentToolPolicy
+    .filter(all, groups, excludeJobTools)
+    .map { it.copy(needsApproval = { false }) }

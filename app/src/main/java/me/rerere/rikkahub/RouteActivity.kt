@@ -258,6 +258,7 @@ class RouteActivity : ComponentActivity() {
                     is AppEvent.WorkspaceJobStarted -> Unit // 由任务通知管理器消费
                     is AppEvent.WorkspaceJobFinished -> Unit // 由任务通知/唤醒管理器消费
                     is AppEvent.WorkspaceJobDeferred -> Unit // 由任务通知管理器消费
+                    is AppEvent.BackgroundRunFinished -> Unit // 由子代理/workflow 的完成管理器消费
                 }
             }
         }

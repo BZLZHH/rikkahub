@@ -102,6 +102,14 @@ private fun runTool(ctx: WorkflowToolContext, needsApproval: (String) -> Boolean
                     put("type", "integer")
                     put("description", "Round budget per subagent, default 20")
                 })
+                put("notify", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "Send a system notification when it finishes (default true)")
+                })
+                put("auto_wake", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "Wake this conversation with the result when it finishes (default false). Costs another generation, so only use it when the user asked to be told.")
+                })
                 put("wait_seconds", buildJsonObject {
                     put("type", "integer")
                     put("description", "How long to wait for the result before returning a runId, default 90")
@@ -136,6 +144,8 @@ private suspend fun executeRun(
             title = params.strJson("title")?.takeIf { it.isNotBlank() },
             modelSpec = params.strJson("model")?.takeIf { it.isNotBlank() },
             reasoningSpec = params.strJson("reasoning")?.takeIf { it.isNotBlank() },
+            notify = params.boolJson("notify") ?: true,
+            autoWake = params.boolJson("auto_wake") ?: false,
             defaultModelId = ctx.defaultModelId,
             conversationId = ctx.conversationId,
             assistantId = ctx.assistantId,

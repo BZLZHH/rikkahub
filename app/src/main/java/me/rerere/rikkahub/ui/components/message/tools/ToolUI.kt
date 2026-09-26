@@ -127,6 +127,10 @@ object ToolUIRegistry {
         SubagentStatusToolUI,
         SubagentResultToolUI,
         SubagentKillToolUI,
+        // workflow_* 动态工作流（有独立的运行页, 卡片上给"查看运行"）
+        WorkflowRunToolUI,
+        WorkflowStatusToolUI,
+        WorkflowKillToolUI,
     ).associateBy { it.toolName }
 
     /** 查找工具对应的渲染器, 未注册时返回默认渲染器 */

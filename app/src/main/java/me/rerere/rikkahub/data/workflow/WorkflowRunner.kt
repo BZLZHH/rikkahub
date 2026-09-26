@@ -23,6 +23,8 @@ import me.rerere.rikkahub.data.db.entity.WorkflowAgentEntity
 import me.rerere.rikkahub.data.db.entity.WorkflowAgentResultEntity
 import me.rerere.rikkahub.data.agent.AgentRunExecutor
 import me.rerere.rikkahub.data.datastore.ModelResolution
+import me.rerere.rikkahub.data.event.AppEvent
+import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.resolveModelSpec
 import me.rerere.rikkahub.data.db.entity.WorkflowRunEntity
@@ -69,6 +71,14 @@ data class WorkflowRunRequest(
      * 不填 = **不干预**, 子代理继承主会话那一档; 脚本里 `agent(p, { reasoning })` 可逐个覆盖。
      */
     val reasoningSpec: String? = null,
+    /** 结束时发系统通知（与 subagent_start 的 notify 同一语义）; 默认发。 */
+    val notify: Boolean = true,
+    /**
+     * 结束时唤醒这个会话, 让 AI 接着汇报。
+     *
+     * **默认关**: 唤醒会真的再起一轮生成、再烧一次 token, 不该是"顺手就发生"的事。
+     */
+    val autoWake: Boolean = false,
 )
 
 /** 单条 agent 重试的受理结果。 */
@@ -105,6 +115,8 @@ class WorkflowRunner(
     private val invoker: WorkflowAgentInvoker,
     private val scripts: WorkflowScriptStore,
     private val settingsStore: SettingsStore,
+    /** 结束时把结果播出去: 通知与唤醒都靠它（见 BackgroundRunCompletionManager）。 */
+    private val appEventBus: AppEventBus,
 ) {
     private val jobs = ConcurrentHashMap<String, Job>()
 
@@ -169,6 +181,8 @@ class WorkflowRunner(
                 name = displayName,
                 modelName = chosenModel?.displayName?.takeIf { it.isNotBlank() }
                     ?: chosenModel?.modelId,
+                notify = request.notify,
+                autoWake = request.autoWake,
                 fingerprint = script.fingerprint,
                 scriptPath = scriptPath,
                 status = RunStatus.RUNNING.name,
@@ -229,6 +243,9 @@ class WorkflowRunner(
                     }
                 }
             } finally {
+                // 收尾的三条路径（成功 / 被停 / 崩了）最终状态都已经写进库了,
+                // 所以这里读一次行、统一播一次事件 —— 比在三个分支里各播一次不容易漏。
+                withContext(NonCancellable) { emitFinished(runId) }
                 jobs.remove(runId)
                 completion.complete(Unit)
                 completions.remove(runId)
@@ -548,6 +565,25 @@ class WorkflowRunner(
                 )
             }.onFailure { Log.w(TAG, "retry result not archived for " + runId + "#" + callIndex, it) }
         }
+    }
+
+    /** 广播"这次运行结束了"。读的是**已经落库的最终状态**, 所以不会与写库抢先后。 */
+    private suspend fun emitFinished(runId: String) {
+        runCatching {
+            val row = dao.getById(runId) ?: return
+            appEventBus.tryEmit(
+                AppEvent.BackgroundRunFinished(
+                    runId = row.id,
+                    isWorkflow = true,
+                    title = row.name,
+                    status = row.status,
+                    runtimeMs = row.runtimeMs,
+                    conversationId = row.conversationId,
+                    notify = row.notify,
+                    autoWake = row.autoWake,
+                )
+            )
+        }.onFailure { Log.w(TAG, "finish event emit failed for " + runId, it) }
     }
 
     /** App 启动时: 协程随进程一起没了, 把残留的"未结束"收敛成中断。 */

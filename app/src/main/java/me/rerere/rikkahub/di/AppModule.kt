@@ -90,6 +90,29 @@ val appModule = module {
                     maxConcurrentAgentsPerWorkspace = s.maxConcurrentAgentsPerWorkspace,
                 )
             },
+            // 子代理结束 → 播事件（通知与唤醒由 BackgroundRunCompletionManager 消费）。
+            // **只处理 AGENT**: shell 任务由 WorkspaceJobManager 自己发事件,
+            // 这里再发一次就会变成两条通知。
+            onRunFinished = { record ->
+                if (record.kind == me.rerere.rikkahub.data.run.RunKind.AGENT) {
+                    runCatching {
+                        get<me.rerere.rikkahub.data.event.AppEventBus>().tryEmit(
+                            me.rerere.rikkahub.data.event.AppEvent.BackgroundRunFinished(
+                                runId = record.runId,
+                                isWorkflow = false,
+                                title = record.title.orEmpty(),
+                                status = record.status.name,
+                                runtimeMs = record.startedAt?.let { start ->
+                                    (record.finishedAt ?: System.currentTimeMillis()) - start
+                                },
+                                conversationId = record.conversationId,
+                                notify = record.notify,
+                                autoWake = record.autoWake,
+                            )
+                        )
+                    }
+                }
+            },
         )
     }
 
@@ -139,6 +162,7 @@ val appModule = module {
             invoker = get(),
             scripts = get(),
             settingsStore = get(),
+            appEventBus = get(),
         )
     }
 
@@ -182,6 +206,16 @@ val appModule = module {
             appScope = get(),
             dao = get(),
             manager = get(),
+            eventBus = get(),
+        )
+    }
+
+    // 子代理 / workflow 结束的通知与唤醒。
+    // createdAtStart: 进程启动即订阅, 否则后台完成的事件会因为"没人听"而丢掉。
+    single(createdAtStart = true) {
+        me.rerere.rikkahub.service.BackgroundRunCompletionManager(
+            context = get(),
+            appScope = get(),
             eventBus = get(),
         )
     }

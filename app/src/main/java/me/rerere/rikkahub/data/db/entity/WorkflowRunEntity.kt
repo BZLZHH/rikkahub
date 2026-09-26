@@ -53,4 +53,10 @@ data class WorkflowRunEntity(
     val startedAt: Long? = null,
     val finishedAt: Long? = null,
     val runtimeMs: Long? = null,
+    /** 结束时发系统通知（与 subagent_start 的 notify 同一语义）。 */
+    @ColumnInfo(defaultValue = "1")
+    val notify: Boolean = true,
+    /** 结束时唤醒这个会话, 让 AI 接着汇报（**默认关**: 唤醒会真的再烧一轮 token）。 */
+    @ColumnInfo(defaultValue = "0")
+    val autoWake: Boolean = false,
 )

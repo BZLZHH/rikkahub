@@ -242,6 +242,11 @@ class RikkaHubApp : Application() {
         get<AppScope>().launch {
             runCatching {
                 get<WorkspaceJobManager>().reconcileOnStart()
+                // 编排层: 子代理的协程随 App 进程一起消失, 残留的"运行中"必须收敛成中断。
+                // 这个入口一直存在, 却**从来没有被调用过** —— 于是子代理在 App 重启后会永远停在
+                // "运行中", 界面上再也下不去。它按 kind 分派给各执行体;
+                // shell 那一路与上面那句重复, 但两边都是幂等的（没东西可收时就是空操作）。
+                get<me.rerere.rikkahub.data.run.RunOrchestrator>().reconcileOnStart()
                 // workflow 的运行是协程, 随 App 进程一起消失; 残留的"运行中"必须收敛成中断,
                 // 否则进度界面会永远停在一个早就不存在的运行上（而且它会一直挡住"同名重跑"的判断）。
                 get<me.rerere.rikkahub.data.workflow.WorkflowRunner>().reconcileOnStart()
