@@ -112,7 +112,13 @@ fun WorkflowRunPage(runId: String) {
             LargeFlexibleTopAppBar(
                 title = {
                     Column {
-                        Text(run?.name ?: "workflow", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // 运行名是"这是哪一次"的主要依据, 一行常常不够 —— 给两行
+                        Text(
+                            text = run?.name ?: "workflow",
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
                         run?.let { Text(it.fingerprint.take(8), style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace) }
                     }
                 },
@@ -143,6 +149,7 @@ fun WorkflowRunPage(runId: String) {
                     runtimeMs = r.runtimeMs ?: r.startedAt?.let { now - it },
                     tokens = agents.sumOf { it.tokensIn + it.tokensOut },
                     agents = agents,
+                    phaseCount = phaseNames.size,
                     error = r.error,
                     progressJson = r.progressJson,
                 )
@@ -162,6 +169,7 @@ fun WorkflowRunPage(runId: String) {
                 AgentList(
                     agents = visibleAgents,
                     now = now,
+                    runModel = run?.modelName,
                     modifier = Modifier.weight(1f),
                     onRetry = { agent ->
                         val result = runner.retryAgent(runId, agent.callIndex)
@@ -194,6 +202,8 @@ private fun RunHeader(
     runtimeMs: Long?,
     tokens: Int,
     agents: List<WorkflowAgentEntity>,
+    /** 左栏那一份阶段数 —— 与左栏**同源**, 免得同一屏出现两个不一样的数字 */
+    phaseCount: Int,
     error: String?,
     progressJson: String,
 ) {
@@ -203,22 +213,46 @@ private fun RunHeader(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            // 刻意拆成两行: 原来挤在一行里时, 模型 chip 会把剩余宽度吃光,
+            // 排在最后又没有 weight 的**耗时会拿到 0 宽度, 被挤成一列一个字**
+            // （真机上就是右上角那一竖列 "1 0 m 4 8 s"）。
+            // 第一行只放"短且必须有"的东西, 第二行放"可以省略号"的东西。
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 StatusDot(status, size = 12)
                 Text(statusLabel(status), style = MaterialTheme.typography.labelLarge, color = accent)
+                Box(Modifier.weight(1f))
+                runtimeMs?.let {
+                    Text(
+                        text = formatDuration(it),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+
+            // 阶段与模型: 都允许被省略号截断（weight + fill=false 让它们按内容取宽、不抢空间）
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 phase?.takeIf { it.isNotBlank() }?.let {
                     Text(
-                        text = "· " + it,
-                        style = MaterialTheme.typography.labelLarge,
+                        text = it,
+                        modifier = Modifier.weight(1f, fill = false),
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 // 模型 chip: 同一脚本换模型跑, 结果可能完全不同 —— 它必须一眼可见
                 modelName?.takeIf { it.isNotBlank() }?.let {
                     Surface(
+                        modifier = Modifier.weight(1f, fill = false),
                         shape = RoundedCornerShape(6.dp),
                         color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f),
                     ) {
@@ -233,15 +267,6 @@ private fun RunHeader(
                         )
                     }
                 }
-                Box(Modifier.weight(1f))
-                runtimeMs?.let {
-                    Text(
-                        text = formatDuration(it),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
             }
 
             // 分段进度条: 完成 / 在跑 / 失败各占一段, 整体形状一眼可读
@@ -251,7 +276,7 @@ private fun RunHeader(
                 HeaderStat("agents", agentsCalled.toString())
                 if (agentsReused > 0) HeaderStat("复用", agentsReused.toString())
                 HeaderStat("tok", formatTokens(tokens))
-                HeaderStat("phase", (agents.mapNotNull { it.phase }.distinct().size).toString())
+                HeaderStat("phase", phaseCount.toString())
             }
 
             // 最近几条活动: 这是"此刻正在发生什么" —— 光有 phases 与 agent 列表,
@@ -358,7 +383,8 @@ private fun PhaseRail(
     selected: String?,
     onSelect: (String?) -> Unit,
 ) {
-    Column(Modifier.width(108.dp).fillMaxHeight().padding(vertical = 8.dp)) {
+    // 108dp 时中文阶段名几乎只剩两三个字, 前缀一样就分不清了 —— 加宽并允许折两行
+    Column(Modifier.width(128.dp).fillMaxHeight().padding(vertical = 8.dp)) {
         Text(
             text = "PHASES",
             style = MaterialTheme.typography.labelSmall,
@@ -426,11 +452,11 @@ private fun RailItem(
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
                 color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = count.toString() + " agents",
+                text = if (count == 1) "1 agent" else count.toString() + " agents",
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
@@ -444,6 +470,7 @@ private fun RailItem(
 private fun AgentList(
     agents: List<WorkflowAgentEntity>,
     now: Long,
+    runModel: String?,
     modifier: Modifier = Modifier,
     onRetry: (WorkflowAgentEntity) -> Unit,
     onOpen: (WorkflowAgentEntity) -> Unit,
@@ -463,7 +490,7 @@ private fun AgentList(
         contentPadding = PaddingValues(vertical = 6.dp),
     ) {
         items(agents, key = { it.callIndex }) { agent ->
-            AgentRow(agent, now = now, onRetry = { onRetry(agent) }, onClick = { onOpen(agent) })
+            AgentRow(agent, now = now, runModel = runModel, onRetry = { onRetry(agent) }, onClick = { onOpen(agent) })
         }
     }
 }
@@ -472,6 +499,7 @@ private fun AgentList(
 private fun AgentRow(
     agent: WorkflowAgentEntity,
     now: Long,
+    runModel: String?,
     onRetry: () -> Unit,
     onClick: () -> Unit,
 ) {
@@ -499,7 +527,7 @@ private fun AgentRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = agentMetaLine(agent),
+                text = agentMetaLine(agent, runModel),
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -536,14 +564,25 @@ private fun AgentRow(
     }
 }
 
-private fun agentMetaLine(agent: WorkflowAgentEntity): String {
+/**
+ * agent 行的第二行。
+ *
+ * **数字在前, 模型只在"与整趟不一样"时才出现** —— 这是真机上暴露的:
+ * 模型是整趟统一的（`workflow_run` 的 `model` 参数）, 每行重复一遍 `deepseek-v4.1-flash`
+ * 会把后面 token 与轮次全挤成省略号, 而那两个数才是用户看这一行时要读的东西。
+ */
+private fun agentMetaLine(agent: WorkflowAgentEntity, runModel: String?): String {
     val parts = buildList {
-        agent.modelName?.takeIf { it.isNotBlank() }?.let { add(it) }
-        // 档位只在**单独指定过**时才显示: 继承主会话是常态, 每条都标一遍反而变成噪音
-        agent.reasoning?.takeIf { it.isNotBlank() }?.let { add("推理 " + it) }
         val tokens = agent.tokensIn + agent.tokensOut
         if (tokens > 0) add(formatTokens(tokens) + " tok")
         if (agent.steps > 0) add(agent.steps.toString() + " 轮")
+        if (agent.toolCalls > 0) add(agent.toolCalls.toString() + " 次工具")
+        // 档位只在**单独指定过**时才显示: 继承主会话是常态, 每条都标一遍反而变成噪音
+        agent.reasoning?.takeIf { it.isNotBlank() }?.let { add("推理 " + it) }
+        // 模型只在与整趟不同时才占用这一行 —— 相同就是纯噪音
+        agent.modelName
+            ?.takeIf { it.isNotBlank() && it != runModel }
+            ?.let { add(it) }
         agent.error?.takeIf { it.isNotBlank() }?.let { add(it.take(40)) }
     }
     return if (parts.isEmpty()) statusLabel(agent.status, agent.reused) else parts.joinToString("  ·  ")
