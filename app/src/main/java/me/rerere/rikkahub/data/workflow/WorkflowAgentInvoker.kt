@@ -10,6 +10,7 @@ import me.rerere.rikkahub.data.agent.AgentToolFactory
 import me.rerere.rikkahub.data.agent.AgentToolGroup
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.rikkahub.data.agent.buildAgentInstructions
+import me.rerere.rikkahub.data.agent.snapshotOf
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import kotlin.uuid.Uuid
@@ -111,7 +112,18 @@ class WorkflowAgentInvoker(
                 maxSteps = maxSteps,
             ).collect { event ->
                 when (event) {
-                    is AgentEvent.Messages -> Unit
+                    is AgentEvent.Messages -> {
+                        // 每轮都报一次。原先这里写的是 `-> Unit`（丢掉）, 只靠整段结束时那一次
+                        // AgentEvent.Progress —— 结果是运行期间界面一直显示 0 tok / 0 工具调用,
+                        // 直到结束才跳一下。数字本来就在这份累积列表里, 现算即可。
+                        val snapshot = snapshotOf(event.messages)
+                        observer.onProgress(
+                            steps = snapshot.steps,
+                            toolCalls = snapshot.toolCalls,
+                            tokensIn = snapshot.tokensIn,
+                            tokensOut = snapshot.tokensOut,
+                        )
+                    }
                     is AgentEvent.Progress -> observer.onProgress(
                         steps = event.steps,
                         toolCalls = event.toolCalls,

@@ -161,6 +161,7 @@ fun WorkflowRunPage(runId: String) {
                 VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 AgentList(
                     agents = visibleAgents,
+                    now = now,
                     modifier = Modifier.weight(1f),
                     onRetry = { agent ->
                         val result = runner.retryAgent(runId, agent.callIndex)
@@ -442,6 +443,7 @@ private fun RailItem(
 @Composable
 private fun AgentList(
     agents: List<WorkflowAgentEntity>,
+    now: Long,
     modifier: Modifier = Modifier,
     onRetry: (WorkflowAgentEntity) -> Unit,
     onOpen: (WorkflowAgentEntity) -> Unit,
@@ -461,7 +463,7 @@ private fun AgentList(
         contentPadding = PaddingValues(vertical = 6.dp),
     ) {
         items(agents, key = { it.callIndex }) { agent ->
-            AgentRow(agent, onRetry = { onRetry(agent) }, onClick = { onOpen(agent) })
+            AgentRow(agent, now = now, onRetry = { onRetry(agent) }, onClick = { onOpen(agent) })
         }
     }
 }
@@ -469,6 +471,7 @@ private fun AgentList(
 @Composable
 private fun AgentRow(
     agent: WorkflowAgentEntity,
+    now: Long,
     onRetry: () -> Unit,
     onClick: () -> Unit,
 ) {
@@ -511,7 +514,13 @@ private fun AgentRow(
                 color = accent,
             )
         }
-        agent.runtimeMs?.let {
+        // 运行中的行没有 runtimeMs, 但耗时恰恰是这时候最想看的 —— 用走时的"现在"现算
+        val elapsed = agent.runtimeMs ?: if (status == RunStatus.RUNNING || status == RunStatus.PENDING) {
+            (now - agent.startedAt).coerceAtLeast(0)
+        } else {
+            null
+        }
+        elapsed?.let {
             Text(
                 text = formatDuration(it),
                 style = MaterialTheme.typography.labelSmall,
