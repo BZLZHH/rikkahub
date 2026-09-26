@@ -33,6 +33,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -191,6 +192,12 @@ fun OnboardingPage() {
  */
     suspend fun finish() {
         val workspaceId = createdId
+        // 预先取一次快照: settingsStore.update 的变换不是挂起函数, 里面查不了库。
+        // 它的用处是识别"助手指向了一个已经被删掉的工作区" —— 那种情况下只判断 null 是不够的,
+        // 助手会一直指着一个不存在的工作区, 而用户重新走一遍向导正是想修这个。
+        val liveWorkspaceIds = runCatching {
+            repository.listFlow().first().map { it.id }.toSet()
+        }.getOrDefault(emptySet())
         settingsStore.update { current ->
             val withModel = if (apiKey.isNotBlank()) {
                 applyModelPreset(current, preset, apiKey, baseUrl, modelId)
@@ -204,7 +211,12 @@ fun OnboardingPage() {
                     withModel.assistants
                 } else {
                     withModel.assistants.map { assistant ->
-                        if (assistant.workspaceId == null) assistant.copy(workspaceId = uuid) else assistant
+                        val bound = assistant.workspaceId?.toString()
+                        if (bound == null || bound !in liveWorkspaceIds) {
+                            assistant.copy(workspaceId = uuid)
+                        } else {
+                            assistant
+                        }
                     }
                 },
                 onboardingCompleted = true,

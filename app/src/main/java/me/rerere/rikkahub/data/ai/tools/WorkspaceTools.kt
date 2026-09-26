@@ -23,11 +23,20 @@ import java.io.ByteArrayOutputStream
 private const val SHELL_TIMEOUT_MAX_SECONDS = 600L
 private const val MAX_READ_FILE_BYTES = 8L * 1024 * 1024
 
+/**
+ * 各工具的**默认**审批策略（用户可以在单个工作区里覆盖, 覆盖值优先）。
+ *
+ * `workspace_shell` 原来是 `true`（每次执行命令都要人工确认）—— 现已改为 false（用户要求）。
+ * 理由也站得住: 首启向导里"自动审批"是默认开启的, 而自动审批本来就会代判这类调用,
+ * 两个默认值互相打架时, 用户看到的是"明明开了自动审批, 还是一直弹窗"。
+ *
+ * 注意这只影响**默认值**: 已经在某个工作区里手动开过审批的, 那台设备上仍然会问。
+ */
 val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_read_file" to false,
     "workspace_write_file" to false,
     "workspace_edit_file" to false,
-    "workspace_shell" to true,
+    "workspace_shell" to false,
 ) + JobToolDefaultApprovals + SubagentToolDefaultApprovals + WorkflowToolDefaultApprovals
 
 fun resolveWorkspaceToolApproval(name: String, overrides: Map<String, Boolean>): Boolean =
