@@ -1567,4 +1567,37 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="workspace_terminal_new_tab">新建终端标签页</string>
   <string name="workspace_terminal_close_tab">关闭终端 %1$d</string>
   <string name="workspace_terminal_no_tabs">没有打开的终端标签页</string>
+  <!-- 工具权限（Permission Kernel） -->
+  <string name="setting_permission_title">工具权限</string>
+  <string name="setting_permission_mode_title">权限档位</string>
+  <string name="setting_permission_mode_plan">只看不改</string>
+  <string name="setting_permission_mode_plan_desc">读取文件、联网搜索；不写不改、不执行命令。</string>
+  <string name="setting_permission_mode_ask">每次都问</string>
+  <string name="setting_permission_mode_ask_desc">写文件、执行命令、设备操作都会先问你。</string>
+  <string name="setting_permission_mode_edit">改文件不问</string>
+  <string name="setting_permission_mode_edit_desc">写文件直接执行，命令仍会询问。</string>
+  <string name="setting_permission_mode_trusted">工作区全信任</string>
+  <string name="setting_permission_mode_trusted_desc">工作区内读写与执行都不问，设备操作仍会询问。</string>
+  <string name="setting_permission_mode_full">全部放行（调试）</string>
+  <string name="setting_permission_mode_full_desc">完全不询问，仅用于调试。</string>
+  <string name="setting_permission_rules_title">记住的规则</string>
+  <string name="setting_permission_rules_empty">还没有。在确认卡片上点「以后都这样」就会记住。</string>
+  <string name="setting_permission_rules_count">已记住 %1$d 条，命中时自动放行。</string>
+  <string name="setting_permission_rule_command">以「%1$s」开头的命令</string>
+  <string name="setting_permission_rule_path">写入「%1$s」下的文件</string>
+  <string name="setting_permission_rule_tool">调用 %1$s</string>
+  <string name="setting_permission_rule_delete">删除规则</string>
+  <string name="chat_tool_consent_grants">将获得</string>
+  <string name="chat_tool_consent_excludes">不含</string>
+  <string name="chat_tool_consent_remember">以后都这样</string>
+  <string name="chat_tool_consent_remember_hint">点书签即以后都这样：%1$s</string>
+  <!-- 运行中心 -->
+  <string name="runs_page_title">运行</string>
+  <string name="runs_section_running">正在进行 · %1$d</string>
+  <string name="runs_section_recent">最近</string>
+  <string name="runs_empty_title">还没有运行记录</string>
+  <string name="runs_empty_desc">让助手跑一个 workflow，或者派一个子代理，这里就会出现它们的状态、阶段与子会话。</string>
+  <string name="runs_stop">停止</string>
+  <string name="runs_finished_toast">它已经结束了</string>
+  <string name="runs_running_count">%1$d 个运行中</string>
 </resources>

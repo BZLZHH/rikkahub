@@ -1563,4 +1563,37 @@
   <string name="setting_auto_approval_scope_title">Only high-impact tools</string>
   <string name="setting_auto_approval_scope_desc">Auto-approve only job_* / workspace_* / mcp__* tools; other tools always ask you.</string>
   <string name="setting_auto_approval_note">Every decision is written to the app log. If the model fails or answers ambiguously, the call falls back to manual confirmation.</string>
+  <!-- Tool permissions (Permission Kernel) -->
+  <string name="setting_permission_title">Tool permissions</string>
+  <string name="setting_permission_mode_title">Permission level</string>
+  <string name="setting_permission_mode_plan">Plan only</string>
+  <string name="setting_permission_mode_plan_desc">Read files and search the web. No writes or commands.</string>
+  <string name="setting_permission_mode_ask">Ask every time</string>
+  <string name="setting_permission_mode_ask_desc">Writing files, running commands and device actions ask first.</string>
+  <string name="setting_permission_mode_edit">Auto-approve edits</string>
+  <string name="setting_permission_mode_edit_desc">File writes run without asking. Commands still ask.</string>
+  <string name="setting_permission_mode_trusted">Trust workspace</string>
+  <string name="setting_permission_mode_trusted_desc">Read, write and run inside the workspace without asking. Device actions still ask.</string>
+  <string name="setting_permission_mode_full">Allow everything (debug)</string>
+  <string name="setting_permission_mode_full_desc">No prompts at all. Only for debugging.</string>
+  <string name="setting_permission_rules_title">Remembered rules</string>
+  <string name="setting_permission_rules_empty">No rules yet. Tap “Always allow” on a confirmation card to remember one.</string>
+  <string name="setting_permission_rules_count">%1$d rule(s), applied automatically</string>
+  <string name="setting_permission_rule_command">Commands starting with “%1$s”</string>
+  <string name="setting_permission_rule_path">Writes under “%1$s”</string>
+  <string name="setting_permission_rule_tool">Calls to %1$s</string>
+  <string name="setting_permission_rule_delete">Delete rule</string>
+  <string name="chat_tool_consent_grants">Grants</string>
+  <string name="chat_tool_consent_excludes">Excludes</string>
+  <string name="chat_tool_consent_remember">Always allow</string>
+  <string name="chat_tool_consent_remember_hint">Tap the bookmark to always allow: %1$s</string>
+  <!-- Runs center -->
+  <string name="runs_page_title">Runs</string>
+  <string name="runs_section_running">Running · %1$d</string>
+  <string name="runs_section_recent">Recent</string>
+  <string name="runs_empty_title">No runs yet</string>
+  <string name="runs_empty_desc">Ask the assistant to run a workflow or spawn a subagent; their status, phases and sub-sessions will show up here.</string>
+  <string name="runs_stop">Stop</string>
+  <string name="runs_finished_toast">It has already finished</string>
+  <string name="runs_running_count">%1$d running</string>
 </resources>

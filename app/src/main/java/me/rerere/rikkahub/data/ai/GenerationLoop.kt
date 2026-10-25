@@ -15,6 +15,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import me.rerere.ai.core.MessageRole
@@ -27,6 +28,13 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
+import me.rerere.rikkahub.data.permission.ConsentInfo
+import me.rerere.rikkahub.data.permission.PermissionChannel
+import me.rerere.rikkahub.data.permission.PermissionContext
+import me.rerere.rikkahub.data.permission.PermissionDecision
+import me.rerere.rikkahub.data.permission.PermissionKernel
+import me.rerere.rikkahub.data.permission.PermissionNormalizer
+import me.rerere.rikkahub.data.permission.ToolEffect
 import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.handleTextGenerationResult
 import me.rerere.ai.ui.limitContext
@@ -42,6 +50,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.utils.JsonInstant
 import java.io.File
 import java.io.IOException
 import java.net.ConnectException
@@ -70,8 +79,6 @@ class GenerationLoop(
     private val context: Context,
     private val providerManager: ProviderManager,
     private val json: Json,
-    /** 工具调用自动审批（用户在设置里开启后生效） */
-    private val autoApprovalJudge: AutoApprovalJudge,
 ) {
     fun generateText(
         settings: Settings,
@@ -89,9 +96,16 @@ class GenerationLoop(
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
+        permission: PermissionContext? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
+        // 唯一裁决点的上下文：交互会话按设置；后台执行体由调用方传入冻结信封
+        val permissionContext = permission ?: PermissionContext.interactive(
+            mode = settings.permissionMode,
+            rules = settings.permissionRules,
+            conversationId = conversationId?.toString(),
+        )
 
         var messages: List<UIMessage> = messages
 
@@ -171,45 +185,39 @@ class GenerationLoop(
                     break
                 }
 
-                // Check for tools that need approval
-                var hasPendingApproval = false
-                val userIntent = messages.lastOrNull { it.role == MessageRole.USER }
-                    ?.summaryAsText(maxLength = 1_500)
-                    .orEmpty()
+                // 唯一裁决点：信封 -> 规则 -> 档位 -> 通道。没有模型判定，也没有 per-tool 开关。
+                var hasPendingConsent = false
                 val updatedTools = toolCalls.map { tool ->
-                    val toolDef = tools.find { it.name == tool.toolName }
-                    when {
-                        // Tool needs approval and state is Auto -> 交给审批模型判断, 通过则直接执行
-                        toolDef?.needsApproval(tool.inputAsJson()) == true &&
-                            tool.approvalState is ToolApprovalState.Auto -> {
-                            val decision = autoApprovalJudge.judge(
-                                settings = settings,
-                                toolName = tool.toolName,
-                                arguments = tool.inputAsJson(),
-                                userIntent = userIntent,
-                            )
-                            if (decision.approved) {
-                                Log.i(TAG, "tool ${tool.toolName} auto-approved: ${decision.reason}")
-                                tool.copy(approvalState = ToolApprovalState.Approved)
-                            } else {
-                                if (decision.judged) {
-                                    Log.i(TAG, "tool ${tool.toolName} not auto-approved: ${decision.reason}")
-                                }
-                                hasPendingApproval = true
-                                tool.copy(approvalState = ToolApprovalState.Pending)
-                            }
-                        }
-                        // State is Pending -> keep waiting
-                        tool.approvalState is ToolApprovalState.Pending -> {
-                            hasPendingApproval = true
-                            tool
-                        }
+                    if (tool.approvalState is ToolApprovalState.Pending) {
+                        hasPendingConsent = true
+                        return@map tool
+                    }
+                    if (tool.approvalState !is ToolApprovalState.Auto) return@map tool
 
-                        else -> tool
+                    val call = PermissionNormalizer.normalize(tool.toolName, tool.inputAsJson())
+                    if (ToolEffect.HUMAN in call.effects &&
+                        permissionContext.channel == PermissionChannel.INTERACTIVE
+                    ) {
+                        // 交互原语（ask_user）：不是授权问题，等用户回答
+                        hasPendingConsent = true
+                        return@map tool.copy(approvalState = ToolApprovalState.Pending)
+                    }
+                    when (val decision = PermissionKernel.evaluate(call, permissionContext)) {
+                        is PermissionDecision.Allow -> tool.copy(approvalState = ToolApprovalState.Approved)
+                        is PermissionDecision.Ask -> {
+                            hasPendingConsent = true
+                            tool.copy(
+                                approvalState = ToolApprovalState.Pending,
+                                metadata = tool.metadata.withConsent(decision.info),
+                            )
+                        }
+                        is PermissionDecision.Deny -> tool.copy(
+                            approvalState = ToolApprovalState.Denied(decision.message),
+                        )
                     }
                 }
 
-                // If any tools were updated to Pending, update the message and break
+                // 需要人确认 / 被拒绝：先把状态写回消息，再决定是等还是继续
                 if (updatedTools != toolCalls) {
                     val lastMessage = messages.last()
                     val updatedParts = lastMessage.parts.map { part ->
@@ -223,9 +231,8 @@ class GenerationLoop(
                     emit(GenerationChunk.Messages(messages))
                 }
 
-                // If there are pending approvals, break and wait for user
-                if (hasPendingApproval) {
-                    Log.i(TAG, "generateText: waiting for tool approval")
+                if (hasPendingConsent) {
+                    Log.i(TAG, "generateText: waiting for consent")
                     break
                 }
 
@@ -241,7 +248,7 @@ class GenerationLoop(
             toolsToProcess.forEach { tool ->
                 when (tool.approvalState) {
                     is ToolApprovalState.Denied -> {
-                        // Tool was denied by user
+                        // 被权限策略或用户拒绝：把原因作为工具结果交回模型
                         val reason = (tool.approvalState as ToolApprovalState.Denied).reason
                         executedTools += tool.copy(
                             output = listOf(
@@ -250,7 +257,7 @@ class GenerationLoop(
                                         buildJsonObject {
                                             put(
                                                 "error",
-                                                JsonPrimitive("Tool execution denied by user. Reason: ${reason.ifBlank { "No reason provided" }}")
+                                                JsonPrimitive("Tool execution denied by permission policy. Reason: ${reason.ifBlank { "No reason provided" }}")
                                             )
                                         }
                                     )
@@ -586,4 +593,13 @@ class GenerationLoop(
         ) + nonTextParts
     }
 
+}
+
+private fun JsonObject?.withConsent(info: ConsentInfo): JsonObject {
+    val base = this ?: JsonObject(emptyMap())
+    return JsonObject(
+        base.toMutableMap().apply {
+            put("consent", JsonInstant.encodeToJsonElement(ConsentInfo.serializer(), info))
+        }
+    )
 }

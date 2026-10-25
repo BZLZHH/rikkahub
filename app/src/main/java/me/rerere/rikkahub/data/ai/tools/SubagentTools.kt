@@ -25,13 +25,6 @@ import me.rerere.rikkahub.utils.JsonInstant
 import kotlin.uuid.Uuid
 
 /** 子代理工具的默认审批（只有 start 需要: 那一刻在放行一个会自主行动的代理）。 */
-val SubagentToolDefaultApprovals: Map<String, Boolean> = mapOf(
-    "subagent_start" to true,
-    "subagent_status" to false,
-    "subagent_result" to false,
-    "subagent_kill" to false,
-)
-
 data class SubagentToolContext(
     val workspaceId: String,
     val conversationId: String?,
@@ -46,10 +39,9 @@ private const val HARD_MAX_STEPS = 60
 
 fun createSubagentTools(
     ctx: SubagentToolContext,
-    needsApproval: (String) -> Boolean,
 ): List<Tool> {
     return listOf(
-        startTool(ctx, needsApproval),
+        startTool(ctx),
         statusTool(ctx),
         resultTool(ctx),
         killTool(ctx),
@@ -61,7 +53,7 @@ private fun schemaString(description: String): JsonObject = buildJsonObject {
     put("description", description)
 }
 
-private fun startTool(ctx: SubagentToolContext, needsApproval: (String) -> Boolean): Tool {
+private fun startTool(ctx: SubagentToolContext): Tool {
     return Tool(
         name = "subagent_start",
         description = buildString {
@@ -101,7 +93,6 @@ private fun startTool(ctx: SubagentToolContext, needsApproval: (String) -> Boole
                 required = listOf("title", "prompt"),
             )
         },
-        needsApproval = { needsApproval("subagent_start") },
         execute = { element -> executeStart(ctx, element.jsonObject) },
     )
 }
@@ -194,7 +185,6 @@ private fun statusTool(ctx: SubagentToolContext): Tool {
                 required = emptyList(),
             )
         },
-        needsApproval = { false },
         execute = { element -> executeStatus(ctx, element.jsonObject) },
     )
 }
@@ -237,7 +227,6 @@ private fun resultTool(ctx: SubagentToolContext): Tool {
                 required = listOf("run_id"),
             )
         },
-        needsApproval = { false },
         execute = { element -> executeResult(ctx, element.jsonObject) },
     )
 }
@@ -278,7 +267,6 @@ private fun killTool(ctx: SubagentToolContext): Tool {
                 required = listOf("run_id"),
             )
         },
-        needsApproval = { false },
         execute = { element -> executeKill(ctx, element.jsonObject) },
     )
 }

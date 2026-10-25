@@ -13,10 +13,8 @@ import me.rerere.ai.provider.Model
  * 1. 用主会话那套 [ChatToolFactory] 拿到完整工具集（复用现有实现, 不另造）;
  * 2. 按 [AgentToolPolicy] 的白名单过滤掉不该给子代理的（递归 / workflow / 人工交互）。
  *
- * **关键**: 过滤后的工具一律 [Tool.copy] 成"不需要审批"。
- * 原因: 子代理没有 UI 通道, 工具若停在 Pending 等人工确认就是**死锁**。
- * 放行它是安全的 —— 能调用什么已经被白名单定死了, 而且父代理为 `subagent_start`
- * 本身已经过了一次人工审批（或用户的自动审批）。
+ * 授权不在这里做：子代理拿到的是一张运行信封（PermissionContext.background()），
+ * 信封内放行、信封外拒绝；因为后台没人可问，绝不会停在 Pending 等人。
  */
 class AgentToolFactory(
     private val chatToolFactory: ChatToolFactory,
@@ -42,15 +40,13 @@ class AgentToolFactory(
 }
 
 /**
- * 白名单过滤 + **一律免审批**。
+ * 白名单过滤：只保留该组允许的工具。
  *
- * 抽成独立函数是为了能单独测: 上面那个方法要一个真的 `ChatToolFactory`（拖着半个 DI 图）才跑得起来,
- * 而真正需要被锁住的语义只有两条 ——
- * 1. 不该给的工具一个都不给（[AgentToolPolicy] 负责）;
- * 2. 剩下的**全部**把 `needsApproval` 关掉。
+ * 抽成独立函数是为了能单独测 —— 上面那个方法要一个真的 ChatToolFactory（拖着半个 DI 图）才跑得起来，
+ * 而这里要保证的语义只有一条：不该给的工具一个都不给（[AgentToolPolicy] 负责）。
  *
- * 第 2 条是**死锁防线**: 子代理没有 UI 通道, 只要有任何一个工具停在 Pending 等人工确认,
- * 那个子代理就永远醒不过来了。所以这条必须对每个工具都成立, 不能有例外。
+ * 授权不在这里做：子代理拿到的是一张运行信封，信封内放行、信封外拒绝。
+ * 后台没人可问，所以不存在“停在 Pending 等人工确认”的死锁。
  */
 internal fun prepareAgentTools(
     all: List<Tool>,
@@ -58,4 +54,3 @@ internal fun prepareAgentTools(
     excludeJobTools: Boolean,
 ): List<Tool> = AgentToolPolicy
     .filter(all, groups, excludeJobTools)
-    .map { it.copy(needsApproval = { false }) }

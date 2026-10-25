@@ -12,6 +12,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationLoop
+import me.rerere.rikkahub.data.permission.PermissionContext
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.utils.JsonInstant
@@ -110,6 +111,8 @@ class AgentRunner(
                 // 给 GenerationLoop 一个宽松的内部上限; **总预算由下面的预算闸盯**
                 maxSteps = maxSteps * 2,
                 workspaceCwd = cwd,
+                // 后台执行体：信封内不询问（没人可问），信封外直接拒绝
+                permission = PermissionContext.background(),
             ).collect { chunk ->
                 when (chunk) {
                     is GenerationChunk.Messages -> {

@@ -7,11 +7,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -29,6 +33,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.BackgroundEffectType
 import me.rerere.rikkahub.data.datastore.DisplaySetting
+import me.rerere.rikkahub.data.permission.PermissionMode
+import me.rerere.rikkahub.data.permission.PermissionRule
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Delete02
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.Select
@@ -360,77 +368,63 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                 }
             }
 
-            // 工具调用自动审批: 需要人工确认的工具调用先交给指定模型判断
+            // 工具权限：一个门卫，查通行证、规矩、档位
             item {
-                val allModels = remember(settings.providers) {
-                    settings.providers.filter { it.enabled }.flatMap { provider ->
-                        provider.models.map { model -> provider to model }
-                    }
-                }
-                val selectedModel = remember(settings.autoApprovalModelId, allModels) {
-                    allModels.firstOrNull { it.second.id == settings.autoApprovalModelId }
-                }
+                val context = androidx.compose.ui.platform.LocalContext.current
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_auto_approval_title)) },
+                    title = { Text(stringResource(R.string.setting_permission_title)) },
                 ) {
                     item(
-                        headlineContent = { Text(stringResource(R.string.setting_auto_approval_enable_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_auto_approval_enable_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_permission_mode_title)) },
+                        supportingContent = {
+                            Text(context.getString(settings.permissionMode.descRes()))
+                        },
                         trailingContent = {
-                            Switch(
-                                checked = settings.autoApprovalEnabled,
-                                onCheckedChange = { enabled ->
-                                    vm.updateSettings(settings.copy(autoApprovalEnabled = enabled))
+                            Select(
+                                options = PermissionMode.entries,
+                                selectedOption = settings.permissionMode,
+                                onOptionSelected = { mode ->
+                                    vm.updateSettings(settings.copy(permissionMode = mode))
                                 },
+                                optionToString = { context.getString(it.titleRes()) },
                             )
                         },
                     )
-                    if (settings.autoApprovalEnabled) {
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_permission_rules_title)) },
+                        supportingContent = {
+                            Text(
+                                if (settings.permissionRules.isEmpty()) {
+                                    stringResource(R.string.setting_permission_rules_empty)
+                                } else {
+                                    stringResource(
+                                        R.string.setting_permission_rules_count,
+                                        settings.permissionRules.size,
+                                    )
+                                }
+                            )
+                        },
+                    )
+                    settings.permissionRules.forEach { rule ->
                         item(
-                            headlineContent = { Text(stringResource(R.string.setting_auto_approval_model_title)) },
-                            supportingContent = {
-                                Text(
-                                    if (selectedModel != null) {
-                                        selectedModel.first.name + " / " + selectedModel.second.displayName
-                                    } else {
-                                        stringResource(R.string.setting_auto_approval_model_fallback)
-                                    }
-                                )
-                            },
+                            headlineContent = { Text(permissionRuleLabel(rule)) },
                             trailingContent = {
-                                Select(
-                                    options = listOf<Pair<me.rerere.ai.provider.ProviderSetting, me.rerere.ai.provider.Model>?>(null) + allModels,
-                                    selectedOption = selectedModel,
-                                    onOptionSelected = { option ->
-                                        vm.updateSettings(settings.copy(autoApprovalModelId = option?.second?.id))
+                                IconButton(
+                                    onClick = {
+                                        vm.updateSettings(
+                                            settings.copy(
+                                                permissionRules = settings.permissionRules - rule,
+                                            )
+                                        )
                                     },
-                                    optionToString = { option ->
-                                        option?.let { it.first.name + " / " + it.second.displayName }
-                                            ?: stringResource(R.string.setting_auto_approval_model_fallback)
-                                    },
-                                )
-                            },
-                        )
-                        item(
-                            headlineContent = { Text(stringResource(R.string.setting_auto_approval_scope_title)) },
-                            supportingContent = { Text(stringResource(R.string.setting_auto_approval_scope_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = settings.autoApprovalActionToolsOnly,
-                                    onCheckedChange = { only ->
-                                        vm.updateSettings(settings.copy(autoApprovalActionToolsOnly = only))
-                                    },
-                                )
-                            },
-                        )
-                        item(
-                            headlineContent = {
-                                Text(
-                                    text = stringResource(R.string.setting_auto_approval_note),
-                                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
-                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                ) {
+                                    Icon(
+                                        imageVector = HugeIcons.Delete02,
+                                        contentDescription = stringResource(R.string.setting_permission_rule_delete),
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
                             },
                         )
                     }
@@ -438,4 +432,33 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
             }
         }
     }
+}
+
+private fun PermissionMode.titleRes(): Int = when (this) {
+    PermissionMode.PLAN -> R.string.setting_permission_mode_plan
+    PermissionMode.ASK -> R.string.setting_permission_mode_ask
+    PermissionMode.EDIT -> R.string.setting_permission_mode_edit
+    PermissionMode.TRUSTED -> R.string.setting_permission_mode_trusted
+    PermissionMode.FULL -> R.string.setting_permission_mode_full
+}
+
+private fun PermissionMode.descRes(): Int = when (this) {
+    PermissionMode.PLAN -> R.string.setting_permission_mode_plan_desc
+    PermissionMode.ASK -> R.string.setting_permission_mode_ask_desc
+    PermissionMode.EDIT -> R.string.setting_permission_mode_edit_desc
+    PermissionMode.TRUSTED -> R.string.setting_permission_mode_trusted_desc
+    PermissionMode.FULL -> R.string.setting_permission_mode_full_desc
+}
+
+@Composable
+private fun permissionRuleLabel(rule: PermissionRule): String = when {
+    rule.commandPrefix != null -> stringResource(
+        R.string.setting_permission_rule_command,
+        rule.commandPrefix,
+    )
+    rule.pathPrefix != null -> stringResource(
+        R.string.setting_permission_rule_path,
+        rule.pathPrefix,
+    )
+    else -> stringResource(R.string.setting_permission_rule_tool, rule.tool)
 }

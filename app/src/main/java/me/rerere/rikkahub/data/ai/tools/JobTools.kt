@@ -45,19 +45,10 @@ data class JobToolContext(
     val dao: WorkspaceJobDAO,
 )
 
-/** 工具名 -> 默认是否需要审批（可在 workspace 设置里覆盖）。 */
-val JobToolDefaultApprovals: Map<String, Boolean> = mapOf(
-    "job_start" to true,
-    "job_run" to true,
-    "job_def_create" to true,
-    "job_def_update" to true,
-)
-
 suspend fun createJobTools(
     ctx: JobToolContext,
-    needsApproval: (String) -> Boolean,
 ): List<Tool> = listOf(
-    jobStartTool(ctx, needsApproval),
+    jobStartTool(ctx),
     jobListTool(ctx),
     jobStatusTool(ctx),
     jobLogsTool(ctx),
@@ -65,18 +56,18 @@ suspend fun createJobTools(
     jobKillTool(ctx),
     jobRestartTool(ctx),
     jobRemoveTool(ctx),
-    jobDefCreateTool(ctx, needsApproval),
-    jobDefUpdateTool(ctx, needsApproval),
+    jobDefCreateTool(ctx),
+    jobDefUpdateTool(ctx),
     jobDefListTool(ctx),
     jobDefRemoveTool(ctx),
-    jobRunTool(ctx, needsApproval),
+    jobRunTool(ctx),
     jobSendTool(ctx),
     jobScreenTool(ctx),
 )
 
 // ---------------------------------------------------------------- 运行实例
 
-private fun jobStartTool(ctx: JobToolContext, needsApproval: (String) -> Boolean) = Tool(
+private fun jobStartTool(ctx: JobToolContext) = Tool(
     name = "job_start",
     description = (
         "Start a background job in this workspace and return immediately. " +
@@ -132,7 +123,6 @@ private fun jobStartTool(ctx: JobToolContext, needsApproval: (String) -> Boolean
             required = emptyList(),
         )
     },
-    needsApproval = { needsApproval("job_start") },
     execute = { element ->
         val params = element.jsonObject
         val command = params.str("command")
@@ -201,7 +191,6 @@ private fun jobListTool(ctx: JobToolContext) = Tool(
             required = emptyList(),
         )
     },
-    needsApproval = { false },
     execute = { element ->
         val params = element.jsonObject
         val statusFilter = params.str("status")?.uppercase()
@@ -227,7 +216,6 @@ private fun jobStatusTool(ctx: JobToolContext) = Tool(
             required = listOf("job_id"),
         )
     },
-    needsApproval = { false },
     execute = { element ->
         val jobId = element.jsonObject.str("job_id")
         runTool {
@@ -264,7 +252,6 @@ private fun jobLogsTool(ctx: JobToolContext) = Tool(
             required = listOf("job_id"),
         )
     },
-    needsApproval = { false },
     execute = { element ->
         val params = element.jsonObject
         val jobId = params.str("job_id")
@@ -310,7 +297,6 @@ private fun jobWaitTool(ctx: JobToolContext) = Tool(
             required = listOf("job_id"),
         )
     },
-    needsApproval = { false },
     execute = { element ->
         val params = element.jsonObject
         val jobId = params.str("job_id")
@@ -351,7 +337,6 @@ private fun jobKillTool(ctx: JobToolContext) = Tool(
             required = listOf("job_id"),
         )
     },
-    needsApproval = { false },
     execute = { element ->
         val params = element.jsonObject
         val jobId = params.str("job_id")
@@ -385,7 +370,6 @@ private fun jobRestartTool(ctx: JobToolContext) = Tool(
             required = listOf("job_id"),
         )
     },
-    needsApproval = { false },
     execute = { element ->
         val params = element.jsonObject
         val jobId = params.str("job_id")
@@ -407,7 +391,6 @@ private fun jobRemoveTool(ctx: JobToolContext) = Tool(
             required = listOf("job_id"),
         )
     },
-    needsApproval = { false },
     execute = { element ->
         val jobId = element.jsonObject.str("job_id")
         runTool {
@@ -426,7 +409,7 @@ private fun jobRemoveTool(ctx: JobToolContext) = Tool(
 
 // ---------------------------------------------------------------- 任务定义 / 调度
 
-private fun jobDefCreateTool(ctx: JobToolContext, needsApproval: (String) -> Boolean) = Tool(
+private fun jobDefCreateTool(ctx: JobToolContext) = Tool(
     name = "job_def_create",
     description = (
         "Create a reusable job definition (template) in this workspace. " +
@@ -465,7 +448,6 @@ private fun jobDefCreateTool(ctx: JobToolContext, needsApproval: (String) -> Boo
             required = listOf("name", "command"),
         )
     },
-    needsApproval = { needsApproval("job_def_create") },
     execute = { element ->
         val params = element.jsonObject
         runTool {
@@ -507,7 +489,7 @@ private fun jobDefCreateTool(ctx: JobToolContext, needsApproval: (String) -> Boo
     },
 )
 
-private fun jobDefUpdateTool(ctx: JobToolContext, needsApproval: (String) -> Boolean) = Tool(
+private fun jobDefUpdateTool(ctx: JobToolContext) = Tool(
     name = "job_def_update",
     description = "Update a job definition (partial): command, cwd, mode, params, env, trigger, enabled, notify, auto_wake, max_runtime_seconds.",
     parameters = {
@@ -530,7 +512,6 @@ private fun jobDefUpdateTool(ctx: JobToolContext, needsApproval: (String) -> Boo
             required = listOf("def_id"),
         )
     },
-    needsApproval = { needsApproval("job_def_update") },
     execute = { element ->
         val params = element.jsonObject
         runTool {
@@ -577,7 +558,6 @@ private fun jobDefListTool(ctx: JobToolContext) = Tool(
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {}, required = emptyList())
     },
-    needsApproval = { false },
     execute = {
         runTool {
             val defs = ctx.dao.listDefs(ctx.workspaceId)
@@ -597,7 +577,6 @@ private fun jobDefRemoveTool(ctx: JobToolContext) = Tool(
             required = listOf("def_id"),
         )
     },
-    needsApproval = { false },
     execute = { element ->
         val defRef = element.jsonObject.str("def_id")
         runTool {
@@ -613,7 +592,7 @@ private fun jobDefRemoveTool(ctx: JobToolContext) = Tool(
     },
 )
 
-private fun jobRunTool(ctx: JobToolContext, needsApproval: (String) -> Boolean) = Tool(
+private fun jobRunTool(ctx: JobToolContext) = Tool(
     name = "job_run",
     description = "Run a job definition right now (its schedule stays untouched).",
     parameters = {
@@ -629,7 +608,6 @@ private fun jobRunTool(ctx: JobToolContext, needsApproval: (String) -> Boolean) 
             required = listOf("def_id"),
         )
     },
-    needsApproval = { needsApproval("job_run") },
     execute = { element ->
         val params = element.jsonObject
         val defRef = params.str("def_id")
@@ -674,7 +652,6 @@ private fun jobSendTool(ctx: JobToolContext) = Tool(
             required = listOf("job_id"),
         )
     },
-    needsApproval = { false },
     execute = { element ->
         val params = element.jsonObject
         val jobId = params.str("job_id")
@@ -712,7 +689,6 @@ private fun jobScreenTool(ctx: ToolContextAlias) = Tool(
             required = listOf("job_id"),
         )
     },
-    needsApproval = { false },
     execute = { element ->
         val jobId = element.jsonObject.str("job_id")
         runTool {

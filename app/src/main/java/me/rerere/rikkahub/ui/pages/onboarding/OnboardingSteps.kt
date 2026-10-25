@@ -48,6 +48,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.AiSecurity01
 import me.rerere.hugeicons.stroke.Cpu
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Zap
@@ -78,14 +79,7 @@ fun WelcomeStep() {
                 modifier = Modifier
                     .size(104.dp)
                     .clip(RoundedCornerShape(30.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primaryContainer,
-                                MaterialTheme.colorScheme.tertiaryContainer,
-                            )
-                        )
-                    ),
+                    .background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
@@ -136,9 +130,9 @@ fun WelcomeStep() {
             }
             StaggeredIn(4, shown) {
                 FeatureRow(
-                    icon = HugeIcons.Zap,
-                    title = "自动审批 · 默认开启",
-                    caption = "少点几十次确认, 高危操作仍然会问你",
+                    icon = HugeIcons.AiSecurity01,
+                    title = "权限由你定",
+                    caption = "问不问看档位与规则；后台任务先看范围",
                 )
             }
         }
@@ -342,8 +336,6 @@ fun WorkspaceStep(
     url: String?,
     installing: Boolean,
     progress: RootfsInstallProgress?,
-    autoApproval: Boolean,
-    onAutoApprovalChange: (Boolean) -> Unit,
     error: String?,
     onSkipInstall: () -> Unit,
 ) {
@@ -352,11 +344,6 @@ fun WorkspaceStep(
             title = "创建工作区",
             subtitle = "AI 读写文件、跑命令都在这个沙箱里。没有它, 那些工具会静默失效。",
         )
-
-        // 显著位置 + 默认开启: 用户指定。
-        // 它决定"每次调用工具都要不要人工点一下确认" —— 不勾的话第一次用会连着弹几十次,
-        // 而很多人根本不知道有这个开关, 只会觉得"这 App 怎么老弹窗"。
-        AutoApprovalCard(checked = autoApproval, onCheckedChange = onAutoApprovalChange)
 
         OutlinedTextField(
             value = name,
@@ -469,70 +456,6 @@ fun WorkspaceStep(
 
         if (!installing) {
             TextButton(onClick = onSkipInstall) { Text("跳过安装, 只建工作区") }
-        }
-    }
-}
-
-@Composable
-private fun AutoApprovalCard(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = if (checked) {
-            MaterialTheme.colorScheme.tertiaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        },
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        if (checked) {
-                            MaterialTheme.colorScheme.tertiary
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest
-                        }
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Zap,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                    tint = if (checked) {
-                        MaterialTheme.colorScheme.onTertiary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                Text(
-                    text = "自动审批" + if (checked) " · 已开启" else " · 已关闭",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = if (checked) {
-                        "AI 调用工具时由模型代为判断, 不再逐条弹窗; 删除/覆盖这类高危操作仍然会问你。"
-                    } else {
-                        "每次调用工具都要你手动确认。第一次用会连着弹很多次。"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
     }
 }

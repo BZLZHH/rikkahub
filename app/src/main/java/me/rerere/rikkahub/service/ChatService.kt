@@ -67,6 +67,8 @@ import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.permission.PermissionNormalizer
+import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
@@ -513,6 +515,7 @@ class ChatService(
         approved: Boolean,
         reason: String = "",
         answer: String? = null,
+        remember: Boolean = false,
     ) = synchronized(sessionManager.getOrCreate(conversationId)) {
         val session = sessionManager.getOrCreate(conversationId)
         val previousJob = session.getJob()
@@ -534,6 +537,9 @@ class ChatService(
                     if (conversation.currentMessages.none { message ->
                             message.getTools().any { it.toolCallId == toolCallId && it.isPending }
                         }) return@afterPreviousGeneration
+                    if (approved && remember && answer == null) {
+                        rememberPermissionRule(conversation, toolCallId)
+                    }
                     val newApprovalState = when {
                         answer != null -> ToolApprovalState.Answered(answer)
                         approved -> ToolApprovalState.Approved
@@ -583,6 +589,31 @@ class ChatService(
         }
 
         session.setJob(job, cancelPrevious = false)
+    }
+
+    /**
+     * 用户点"以后都这样"：把这次调用概括成规则并持久化。
+     *
+     * 规则只从同意里长出来，不提供手写入口 —— 降低心智负担，也避免手写规则与真实调用形状脱节。
+     */
+    private suspend fun rememberPermissionRule(conversation: Conversation, toolCallId: String) {
+        val tool = conversation.currentMessages
+            .asSequence()
+            .flatMap { it.getTools().asSequence() }
+            .firstOrNull { it.toolCallId == toolCallId } ?: return
+        val args = runCatching {
+            JsonInstant.parseToJsonElement(tool.input.ifBlank { "{}" })
+        }.getOrNull() ?: return
+        val call = PermissionNormalizer.normalize(tool.toolName, args)
+        val rule = PermissionNormalizer.propose(call) ?: return
+        settingsStore.update { current ->
+            val exists = current.permissionRules.any {
+                it.tool == rule.tool &&
+                    it.commandPrefix == rule.commandPrefix &&
+                    it.pathPrefix == rule.pathPrefix
+            }
+            if (exists) current else current.copy(permissionRules = current.permissionRules + rule)
+        }
     }
 
     // ---- 处理消息补全 ----

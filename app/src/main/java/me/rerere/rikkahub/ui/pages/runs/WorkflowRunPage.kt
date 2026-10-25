@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,6 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.db.dao.WorkflowRunDAO
 import me.rerere.rikkahub.data.db.entity.WorkflowAgentEntity
@@ -126,7 +128,7 @@ fun WorkflowRunPage(runId: String) {
                 actions = {
                     if (running) {
                         TextButton(onClick = { scope.launch { runner.kill(runId) } }) {
-                            Text("停止")
+                            Text(stringResource(R.string.runs_stop))
                         }
                     }
                 },

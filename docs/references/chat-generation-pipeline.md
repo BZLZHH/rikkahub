@@ -153,19 +153,22 @@ onSuccess
 6. **MCP Tools** — 所有已连接 MCP 服务器的工具，命名格式 `mcp__{serverName}__{toolName}`
 7. **Memory Tools**（`buildMemoryTools`，内置于 GenerationHandler）— `enableMemory = true` 时，支持记忆的增删改
 
-### 工具审批状态机
+### 工具权限（Permission Kernel）
 
-```
-Auto（默认）
-    │ toolDef.needsApproval() == true
-    ▼
-Pending ──── 用户操作 ────► Approved → 执行工具
-                       ──► Denied   → 返回拒绝错误
-                       ──► Answered → 使用用户提供的文本作为结果
-```
+工具不再声明"要不要问我"，只声明"我会做什么"（见 PermissionNormalizer.effectsOf）。每次工具调用
+经过唯一裁决点 PermissionKernel.evaluate，顺序固定：
 
-审批流程由 `ChatService.handleToolApproval()` 触发，更新状态后重新调用 `handleMessageComplete()`，`GenerationHandler` 检测到
-`canResumeExecution` 的 Tool 后直接跳过本轮生成，进入工具执行阶段。
+1. **运行信封**：后台执行体的信封里没有 HUMAN / DELEGATE —— 子代理不能反过来再派生执行体；
+2. **规则**：用户在同意卡片上点"以后都这样"沉淀下来的规则（deny 优先，其次 ask、allow）；
+3. **档位**：没有规则命中时按 Settings.permissionMode（PLAN / ASK / EDIT / TRUSTED / FULL）；
+4. **通道降级**：非交互通道上 ASK 直接变 DENY —— 没人可问，绝不把执行体挂死。
+
+结果只有三种：放行 / 弹同意卡片 / 拒绝。没有 LLM 判定器，没有 per-tool 布尔开关，也没有"后台一律剥审批"。
+
+同意卡片的信息写在 tool part 的 metadata.consent 里（摘要 + 将获得 + 不含 + 规则草案），随消息持久化。
+
+ToolApprovalState 仍然存在，但它现在只是**投影**：Auto = 裁决前，Pending = 等同意，
+Approved / Denied = 已裁决，Answered = 交互问答。
 
 ### 工具输出截断
 

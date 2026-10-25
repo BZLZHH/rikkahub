@@ -58,7 +58,7 @@ fun jobStatusLabel(status: String): String = stringResource(
 @Composable
 fun jobStatusColor(status: String): Color = when (WorkspaceJobStatus.from(status)) {
     WorkspaceJobStatus.RUNNING -> MaterialTheme.colorScheme.primary
-    WorkspaceJobStatus.SUCCEEDED -> Color(0xFF2E7D32)
+    WorkspaceJobStatus.SUCCEEDED -> MaterialTheme.colorScheme.tertiary
     WorkspaceJobStatus.FAILED, WorkspaceJobStatus.TIMED_OUT -> MaterialTheme.colorScheme.error
     WorkspaceJobStatus.KILLED, WorkspaceJobStatus.INTERRUPTED -> MaterialTheme.colorScheme.tertiary
     else -> MaterialTheme.colorScheme.onSurfaceVariant

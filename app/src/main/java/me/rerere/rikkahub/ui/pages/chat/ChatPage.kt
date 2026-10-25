@@ -524,6 +524,9 @@ private fun ChatPageContent(
                 onToolApproval = { toolCallId, approved, reason ->
                     vm.handleToolApproval(toolCallId, approved, reason)
                 },
+                onToolRemember = { toolCallId ->
+                    vm.rememberToolRule(toolCallId)
+                },
                 onToolAnswer = { toolCallId, answer ->
                     vm.handleToolAnswer(toolCallId, answer)
                 },

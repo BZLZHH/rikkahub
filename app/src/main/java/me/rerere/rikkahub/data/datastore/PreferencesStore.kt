@@ -41,6 +41,8 @@ import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
 import me.rerere.rikkahub.data.run.RunQuota
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
+import me.rerere.rikkahub.data.permission.PermissionMode
+import me.rerere.rikkahub.data.permission.PermissionRule
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.InjectionPosition
@@ -175,9 +177,8 @@ class SettingsStore(
         val WEB_SERVER_LOCALHOST_ONLY = booleanPreferencesKey("web_server_localhost_only")
 
         // 工具调用自动审批（由指定模型判断是否可以跳过人工确认）
-        val AUTO_APPROVAL_ENABLED = booleanPreferencesKey("auto_approval_enabled")
-        val AUTO_APPROVAL_MODEL = stringPreferencesKey("auto_approval_model")
-        val AUTO_APPROVAL_ACTION_TOOLS_ONLY = booleanPreferencesKey("auto_approval_action_tools_only")
+        val PERMISSION_MODE = stringPreferencesKey("permission_mode")
+        val PERMISSION_RULES = stringPreferencesKey("permission_rules")
 
         // 后台常驻（常驻通知）
         val BACKGROUND_RUNNING_ENABLED = booleanPreferencesKey("background_running_enabled")
@@ -269,11 +270,8 @@ class SettingsStore(
                 preferences[MAX_CONCURRENT_JOBS_PER_WORKSPACE] = settings.maxConcurrentJobsPerWorkspace
                 preferences[MAX_CONCURRENT_AGENTS] = settings.maxConcurrentAgents
                 preferences[MAX_CONCURRENT_AGENTS_PER_WORKSPACE] = settings.maxConcurrentAgentsPerWorkspace
-                preferences[AUTO_APPROVAL_ENABLED] = settings.autoApprovalEnabled
-                preferences[AUTO_APPROVAL_ACTION_TOOLS_ONLY] = settings.autoApprovalActionToolsOnly
-                settings.autoApprovalModelId?.let {
-                    preferences[AUTO_APPROVAL_MODEL] = it.toString()
-                } ?: preferences.remove(AUTO_APPROVAL_MODEL)
+                preferences[PERMISSION_MODE] = settings.permissionMode.name
+                preferences[PERMISSION_RULES] = JsonInstant.encodeToString(settings.permissionRules)
                 preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
                 preferences[LAUNCH_COUNT] = settings.launchCount
                 preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
@@ -380,9 +378,12 @@ class SettingsStore(
                 maxConcurrentAgents = preferences[MAX_CONCURRENT_AGENTS] ?: RunQuota.DEFAULT_MAX_CONCURRENT_AGENTS,
                 maxConcurrentAgentsPerWorkspace = preferences[MAX_CONCURRENT_AGENTS_PER_WORKSPACE]
                     ?: RunQuota.DEFAULT_MAX_CONCURRENT_AGENTS_PER_WORKSPACE,
-                autoApprovalEnabled = preferences[AUTO_APPROVAL_ENABLED] == true,
-                autoApprovalModelId = preferences[AUTO_APPROVAL_MODEL]?.let { Uuid.parse(it) },
-                autoApprovalActionToolsOnly = preferences[AUTO_APPROVAL_ACTION_TOOLS_ONLY] != false,
+                permissionMode = preferences[PERMISSION_MODE]
+                    ?.let { runCatching { PermissionMode.valueOf(it) }.getOrNull() }
+                    ?: PermissionMode.ASK,
+                permissionRules = preferences[PERMISSION_RULES]
+                    ?.let { runCatching { JsonInstant.decodeFromString<List<PermissionRule>>(it) }.getOrNull() }
+                    ?: emptyList(),
                 backupReminderConfig = preferences[BACKUP_REMINDER_CONFIG]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: BackupReminderConfig(),
@@ -658,12 +659,10 @@ data class Settings(
     val maxConcurrentAgents: Int = RunQuota.DEFAULT_MAX_CONCURRENT_AGENTS,
     /** 并发上限: 子代理(每 workspace)。 */
     val maxConcurrentAgentsPerWorkspace: Int = RunQuota.DEFAULT_MAX_CONCURRENT_AGENTS_PER_WORKSPACE,
-    /** 自动审批: 需要审批的工具调用先交给 [autoApprovalModelId] 判断, 通过则跳过人工确认。 */
-    val autoApprovalEnabled: Boolean = false,
-    /** 审批模型; null 表示使用"快速模型" */
-    val autoApprovalModelId: Uuid? = null,
-    /** 仅对高影响工具（job_* / workspace_* / mcp__*）自动审批, 其余仍人工确认 */
-    val autoApprovalActionToolsOnly: Boolean = true,
+    /** 权限档位：没被规则覆盖时，工具调用默认怎么处理。 */
+    val permissionMode: PermissionMode = PermissionMode.ASK,
+    /** 用户点过"以后都这样"沉淀下来的规则（从同意里长出来，不是手写配置）。 */
+    val permissionRules: List<PermissionRule> = emptyList(),
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
     val launchCount: Int = 0,
     val sponsorAlertDismissedAt: Int = 0,

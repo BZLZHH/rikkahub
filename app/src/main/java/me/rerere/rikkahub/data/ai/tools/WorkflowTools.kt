@@ -27,12 +27,6 @@ import me.rerere.rikkahub.data.workflow.WorkflowStartResult
  * 这与 subagent_start 是同一量级的放行, 不能悄悄发生。
  * status / kill 是只读与止损, 不需要审批。
  */
-val WorkflowToolDefaultApprovals: Map<String, Boolean> = mapOf(
-    "workflow_run" to true,
-    "workflow_status" to false,
-    "workflow_kill" to false,
-)
-
 data class WorkflowToolContext(
     val workspaceId: String,
     /**
@@ -58,9 +52,8 @@ private const val HARD_WAIT_SECONDS = 600
 
 fun createWorkflowTools(
     ctx: WorkflowToolContext,
-    needsApproval: (String) -> Boolean,
 ): List<Tool> = listOf(
-    runTool(ctx, needsApproval),
+    runTool(ctx),
     statusTool(ctx),
     killTool(ctx),
 )
@@ -70,7 +63,7 @@ private fun schemaString(description: String): JsonObject = buildJsonObject {
     put("description", description)
 }
 
-private fun runTool(ctx: WorkflowToolContext, needsApproval: (String) -> Boolean): Tool = Tool(
+private fun runTool(ctx: WorkflowToolContext): Tool = Tool(
     name = "workflow_run",
     description = buildString {
         append("Run a dynamic workflow: a JavaScript script that orchestrates subagents itself. ")
@@ -118,7 +111,6 @@ private fun runTool(ctx: WorkflowToolContext, needsApproval: (String) -> Boolean
             required = emptyList(),
         )
     },
-    needsApproval = { needsApproval("workflow_run") },
     execute = { element -> executeRun(ctx, element.jsonObject) },
 )
 
@@ -201,7 +193,6 @@ private fun statusTool(ctx: WorkflowToolContext): Tool = Tool(
             required = emptyList(),
         )
     },
-    needsApproval = { false },
     execute = { element -> executeStatus(ctx, element.jsonObject) },
 )
 
@@ -245,7 +236,6 @@ private fun killTool(ctx: WorkflowToolContext): Tool = Tool(
             required = listOf("run_id"),
         )
     },
-    needsApproval = { false },
     execute = { element -> executeKill(ctx, element.jsonObject) },
 )
 

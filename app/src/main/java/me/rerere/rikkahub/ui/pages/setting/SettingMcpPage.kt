@@ -881,21 +881,6 @@ private fun McpToolsConfigure(
                         )
                     )
                 },
-                onNeedsApprovalChange = { newVal ->
-                    update(
-                        config.clone(
-                            commonOptions = config.commonOptions.copy(
-                                tools = config.commonOptions.tools.map {
-                                    if (tool.name == it.name) {
-                                        it.copy(needsApproval = newVal)
-                                    } else {
-                                        it
-                                    }
-                                }
-                            )
-                        )
-                    )
-                }
             )
         }
     }
@@ -905,7 +890,6 @@ private fun McpToolsConfigure(
 private fun McpToolCard(
     tool: McpTool,
     onEnableChange: (Boolean) -> Unit,
-    onNeedsApprovalChange: (Boolean) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Card(
@@ -933,21 +917,6 @@ private fun McpToolCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // 需要审批开关
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.setting_mcp_page_needs_approval),
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    Switch(
-                        checked = tool.needsApproval,
-                        onCheckedChange = onNeedsApprovalChange,
-                        size = SwitchSize.Small
-                    )
-                }
                 // 启用开关
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

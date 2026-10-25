@@ -269,6 +269,16 @@ class ChatVM(
         chatService.handleToolApproval(_conversationId, toolCallId, approved, reason)
     }
 
+    /** 同意这次调用，并把它概括成规则记住。 */
+    fun rememberToolRule(toolCallId: String) {
+        chatService.handleToolApproval(
+            _conversationId,
+            toolCallId,
+            approved = true,
+            remember = true,
+        )
+    }
+
     fun handleToolAnswer(
         toolCallId: String,
         answer: String,

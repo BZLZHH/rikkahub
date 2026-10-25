@@ -65,15 +65,7 @@ fun OnboardingScaffold(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                        MaterialTheme.colorScheme.surface,
-                        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.30f),
-                    )
-                )
-            ),
+            .background(MaterialTheme.colorScheme.surface),
     ) {
         Column(Modifier.fillMaxSize().systemBarsPadding()) {
             StepBar(step = step, total = totalSteps)
@@ -213,7 +205,7 @@ fun SelectCard(
         targetValue = if (selected) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
         } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
+            MaterialTheme.colorScheme.surfaceContainer
         },
         animationSpec = tween(ONBOARD_ANIM_MS),
         label = "cardBackground",
@@ -230,15 +222,15 @@ fun SelectCard(
     Surface(
         modifier = modifier
             .scale(scale)
-            .clip(RoundedCornerShape(14.dp))
-            .border(1.5.dp, borderColor, RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(20.dp))
+            .border(1.5.dp, borderColor, RoundedCornerShape(20.dp))
             .clickable(
                 enabled = enabled,
                 interactionSource = interaction,
                 indication = null,
                 onClick = onClick,
             ),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(20.dp),
         color = background,
     ) {
         Column(
@@ -266,7 +258,7 @@ fun SelectChip(
         targetValue = if (selected) {
             MaterialTheme.colorScheme.primaryContainer
         } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
+            MaterialTheme.colorScheme.surfaceContainer
         },
         animationSpec = tween(ONBOARD_ANIM_MS),
         label = "chipBackground",
@@ -312,11 +304,11 @@ fun Bullet(text: String, marker: String = "·") {
 fun InfoCard(
     title: String,
     body: String,
-    container: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    container: Color = MaterialTheme.colorScheme.surfaceContainer,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(20.dp),
         color = container,
     ) {
         Column(
