@@ -2,9 +2,9 @@ package me.rerere.rikkahub.data.workflow
 
 import android.util.Log
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.first
 import me.rerere.rikkahub.data.agent.AgentBudgetExceededException
 import me.rerere.rikkahub.data.agent.AgentEvent
+import me.rerere.rikkahub.data.agent.AgentExecutionSnapshot
 import me.rerere.rikkahub.data.agent.AgentRunner
 import me.rerere.rikkahub.data.agent.AgentToolFactory
 import me.rerere.rikkahub.data.agent.AgentToolGroup
@@ -57,19 +57,26 @@ class WorkflowAgentInvoker(
         modelId: Uuid?,
         conversationId: String?,
         assistantId: String?,
+        workspaceId: String,
         cwd: String?,
         maxSteps: Int,
+        executionSnapshot: AgentExecutionSnapshot? = null,
     ): String? {
         val prompt = call.prompt
         val label = call.label
-        val settings = settingsStore.settingsFlowRaw.first()
-        val parentAssistant = settings.assistants.firstOrNull { it.id.toString() == assistantId }
-            ?: settings.assistants.firstOrNull()
-            ?: return null
+        val settings = settingsStore.awaitLoaded()
+        val parentAssistant = executionSnapshot?.assistantFor(workspaceId, call.reasoning) ?: run {
+            // Older runs have no captured settings; new runs never reload the assistant profile.
+            val stored = settings.assistants.firstOrNull { it.id.toString() == assistantId }
+                ?: settings.assistants.firstOrNull()
+                ?: return null
+            stored.copy(workspaceId = Uuid.parse(workspaceId))
+        }
         // 模型由**这一次运行**决定（见 WorkflowRunRequest.modelSpec）:
         // 默认就是主会话当前那个 —— 用户说"用 workflow 做 X"时, 想的是"用我正在聊的模型"。
         // 只有调用方没给（老调用点/异常情况）才退回快速模型。
-        val model = settings.findModelById(modelId, settings.fastModelId) ?: return null
+        val model = executionSnapshot?.model?.takeIf { modelId == null || it.id == modelId }
+            ?: settings.findModelById(modelId, settings.fastModelId) ?: return null
 
         val groups = setOf(AgentToolGroup.WORKSPACE)
         // 工具白名单与子代理共用: workflow_* / subagent_* / ask_user 永远不会发给它们

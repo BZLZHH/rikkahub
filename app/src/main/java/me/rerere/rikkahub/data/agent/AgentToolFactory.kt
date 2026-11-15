@@ -33,7 +33,7 @@ class AgentToolFactory(
             assistant = assistant,
             model = model,
             workspaceCwd = cwd,
-            conversationId = conversationId,
+            conversationId = conversationId?.let { kotlin.uuid.Uuid.parse(it) },
         )
         return prepareAgentTools(all, groups, excludeJobTools)
     }

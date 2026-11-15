@@ -38,7 +38,7 @@ fun ToolApprovalState.canResumeToolExecution(): Boolean {
         is ToolApprovalState.Answered -> true
         ToolApprovalState.Auto,
         ToolApprovalState.Pending,
-            -> false
+        -> false
     }
 }
 
@@ -187,7 +187,10 @@ sealed class UIMessagePart {
         val input: String,
         val output: List<UIMessagePart> = emptyList(),
         val approvalState: ToolApprovalState = ToolApprovalState.Auto,
-        override var metadata: JsonObject? = null
+        override var metadata: JsonObject? = null,
+        // 本地执行的起止时间，只统计真正运行工具的耗时；拒绝、问答和旧消息都为空
+        val startedAt: Instant? = null,
+        val finishedAt: Instant? = null,
     ) : UIMessagePart() {
         /** Whether the tool has been executed (has output) */
         val isExecuted: Boolean get() = output.isNotEmpty()
@@ -211,7 +214,25 @@ sealed class UIMessagePart {
                 output = output + other.output,
                 approvalState = approvalState,
                 metadata = if (other.metadata != null) other.metadata else metadata,
+                startedAt = startedAt,
+                finishedAt = finishedAt,
             )
         }
     }
+
+    /**
+     * 运行过程中要告诉模型的事件，例如后台命令结束。
+     *
+     * 生成中由 agent 循环在轮到模型回复时追加到助手消息里，开始新的一轮时单独存成一条 user 消息，
+     * 和其它 part 一样保存在会话中；
+     * 请求时由 [me.rerere.ai.agent.expandNotices] 在所在位置拆成一条 user 消息，前缀固定，可以命中提示词缓存。
+     * [title] 只用于界面展示，[text] 是发给模型的内容。
+     */
+    @Serializable
+    @SerialName("notice")
+    data class Notice(
+        val title: String,
+        val text: String,
+        override var metadata: JsonObject? = null,
+    ) : UIMessagePart()
 }

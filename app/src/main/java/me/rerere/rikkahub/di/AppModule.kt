@@ -4,7 +4,6 @@ import com.google.firebase.Firebase
 import com.google.firebase.analytics.analytics
 import com.google.firebase.crashlytics.crashlytics
 import kotlinx.serialization.json.Json
-import kotlinx.coroutines.flow.first
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.run.RunOrchestrator
 import me.rerere.rikkahub.data.run.RunQuotaConfig
@@ -16,8 +15,14 @@ import me.rerere.rikkahub.data.job.JobScheduleEngine
 import me.rerere.rikkahub.data.job.JobWakeCoordinator
 import me.rerere.rikkahub.data.job.WorkspaceJobManager
 import me.rerere.rikkahub.service.WorkspaceJobNotificationManager
+import me.rerere.rikkahub.data.ai.ChatRequestFactory
+import me.rerere.rikkahub.phoneuse.PhoneUseManager
+import me.rerere.rikkahub.service.BackgroundShellManager
+import me.rerere.rikkahub.service.ChatFloatingTracker
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.MediaCreationService
+import me.rerere.rikkahub.ui.floating.ChatFloatingWindows
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalSessionManager
 import me.rerere.rikkahub.utils.EmojiData
 import me.rerere.rikkahub.utils.EmojiUtils
@@ -36,7 +41,11 @@ val appModule = module {
     }
 
     single {
-        LocalTools(get(), get(), get(), get())
+        PhoneUseManager()
+    }
+
+    single {
+        LocalTools(get(), get(), get(), get(), get(), get())
     }
 
     single {
@@ -74,7 +83,7 @@ val appModule = module {
     }
 
     single {
-        WorkspaceTerminalSessionManager(get(), get())
+        WorkspaceTerminalSessionManager(get(), get(), get(), get())
     }
 
     // 执行编排层: shell 后台任务与子代理共用（配额分账 / 看门狗 / 取消收尾）
@@ -82,7 +91,7 @@ val appModule = module {
         RunOrchestrator(
             scope = get(),
             quotaReader = {
-                val s = get<SettingsStore>().settingsFlowRaw.first()
+                val s = get<SettingsStore>().awaitLoaded()
                 RunQuotaConfig(
                     maxConcurrentJobs = s.maxConcurrentJobs,
                     maxConcurrentJobsPerWorkspace = s.maxConcurrentJobsPerWorkspace,
@@ -125,7 +134,8 @@ val appModule = module {
 
     single {
         me.rerere.rikkahub.data.agent.AgentRunner(
-            generationLoop = get(),
+            // Resolve only when an agent runs: ChatToolFactory owns WorkflowRunner.
+            requestFactory = { get() },
             transcripts = get(),
         )
     }
@@ -163,6 +173,7 @@ val appModule = module {
             scripts = get(),
             settingsStore = get(),
             appEventBus = get(),
+            transcripts = get(),
         )
     }
 
@@ -250,9 +261,29 @@ val appModule = module {
         )
     }
 
+    // ChatService 只在后台才用到，延迟创建
+    single {
+        ChatFloatingTracker(
+            appScope = get(),
+            lazyChatService = lazy { get() },
+            settingsStore = get(),
+        )
+    }
+
+    // 同上，进程启动即开始监听前后台切换
+    single(createdAtStart = true) {
+        ChatFloatingWindows(
+            context = get(),
+            appScope = get(),
+            tracker = get(),
+            phoneUseManager = get(),
+            lazyChatService = lazy { get() },
+        )
+    }
+
     single {
         ChatToolFactory(
-            json = get(),
+            context = get(),
             memoryRepository = get(),
             conversationRepository = get(),
             localTools = get(),
@@ -268,6 +299,26 @@ val appModule = module {
             workflowRunner = get(),
             workflowScriptStore = get(),
             workflowRunDao = get(),
+            backgroundShellManager = get(),
+        )
+    }
+
+    single {
+        BackgroundShellManager(
+            context = get(),
+            workspaceRepository = get(),
+        )
+    }
+
+    single {
+        ChatRequestFactory(
+            context = get(),
+            providerManager = get(),
+            usageRecorder = get(),
+            chatToolFactory = get(),
+            memoryRepository = get(),
+            templateTransformer = get(),
+            workspaceRepository = get(),
         )
     }
 
@@ -278,16 +329,26 @@ val appModule = module {
             appEventBus = get(),
             settingsStore = get(),
             conversationRepo = get(),
-            memoryRepository = get(),
-            generationLoop = get(),
+            requestFactory = get(),
+            memoryConsolidationScheduler = get(),
             translationHandler = get(),
-            templateTransformer = get(),
-            providerManager = get(),
-            chatToolFactory = get(),
+            metaGenerator = get(),
             mcpManager = get(),
             filesManager = get(),
-            workspaceRepository = get(),
-            folderRepository = get()
+            folderRepository = get(),
+            backgroundShellManager = get(),
+        )
+    }
+
+    single {
+        MediaCreationService(
+            context = get(),
+            appScope = get(),
+            settingsStore = get(),
+            repository = get(),
+            manager = get(),
+            remoteFileStore = get(),
+            okHttpClient = get(),
         )
     }
 

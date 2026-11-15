@@ -24,7 +24,7 @@ internal object ProotCommand {
         "PAGER=cat",
     )
 
-    fun hasUsableRootfs(dir: File): Boolean = dir.isDirectory && File(dir, "bin/sh").isFile
+    fun hasUsableRootfs(dir: File): Boolean = WorkspaceManager.isUsableRootfs(dir)
 
     fun build(
         context: WorkspaceShellContext,
@@ -32,6 +32,7 @@ internal object ProotCommand {
         command: String = context.command,
         cwd: String = context.cwd,
         extraEnv: Map<String, String> = emptyMap(),
+        script: String = "cd -- \"\$1\" && eval \"\$2\"",
     ): List<String> {
         val args = mutableListOf(
             proot.absolutePath,
@@ -65,11 +66,11 @@ internal object ProotCommand {
         args += BASE_ENV
         extraEnv.forEach { (key, value) -> args += "$key=$value" }
         args += listOf(
-            "/bin/bash",
+            WorkspaceManager.rootfsShell(context.linuxDir),
             "-l",
             "-c",
             // 命令通过位置参数传入, 避免任何转义; eval "\$2" 对命令文本只求值一次, 等价于 bash -c "$cmd"
-            "cd -- \"\$1\" && eval \"\$2\"",
+            script,
             "rikkahub",
             context.prootCwd(cwd),
             command,

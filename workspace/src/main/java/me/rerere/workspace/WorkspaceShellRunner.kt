@@ -7,7 +7,34 @@ import java.util.concurrent.TimeUnit
 
 interface WorkspaceShellRunner {
     fun execute(context: WorkspaceShellContext): WorkspaceCommandResult
+
+    /** 在后台启动命令并立即返回, [id] 用来命名日志文件; [WorkspaceShellContext.timeoutMillis] 不起作用 */
+    fun startBackground(context: WorkspaceShellContext, id: String): WorkspaceBackgroundCommand =
+        throw UnsupportedOperationException("Background commands are not supported by this shell")
+
+    /** 交互式终端的启动参数, 不支持交互式终端时返回 null */
+    fun terminalLaunch(context: WorkspaceTerminalContext): WorkspaceTerminalLaunch? = null
 }
+
+data class WorkspaceTerminalContext(
+    val filesDir: File,
+    val linuxDir: File,
+    val tempDir: File,
+    val bindMounts: List<WorkspaceBindMount> = emptyList(),
+    val shellCompatibilityMode: Boolean = false,
+    /** 非空时作为 PTY 任务执行, 否则启动交互式 shell */
+    val command: String? = null,
+    val cwd: String = "",
+    val extraEnv: Map<String, String> = emptyMap(),
+)
+
+/** 交给终端模拟器拉起的本地进程 */
+data class WorkspaceTerminalLaunch(
+    val executable: String,
+    val cwd: String,
+    val args: List<String>,
+    val env: List<String>,
+)
 
 data class WorkspaceShellContext(
     val root: String,
@@ -39,7 +66,12 @@ class HostShellRunner : WorkspaceShellRunner {
 // 单个流保留的最大字符数, 防止命令疯狂输出导致 OOM 或撑爆 LLM 上下文
 const val MAX_OUTPUT_CHARS = 128 * 1024
 
-fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): WorkspaceCommandResult {
+/** 等待命令结束并收集输出; 超时或线程被中断时用 [terminate] 结束进程 */
+fun Process.readResult(
+    timeoutMillis: Long,
+    stdin: ByteArray? = null,
+    terminate: Process.() -> Unit = { destroyForcibly() },
+): WorkspaceCommandResult {
     val stdout = StreamCollector(inputStream)
     val stderr = StreamCollector(errorStream)
     val stdinWriter = stdin?.let { bytes -> StreamWriter(outputStream, bytes) }
@@ -55,7 +87,7 @@ fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): Workspace
     try {
         val finished = waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
         if (!finished) {
-            destroyForcibly()
+            terminate()
         }
         stdinWriter?.join(1_000)
         stdout.join(1_000)
@@ -69,7 +101,7 @@ fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): Workspace
         )
     } catch (e: InterruptedException) {
         // 调用方线程被中断（如协程取消时的 runInterruptible），杀掉进程避免命令继续执行
-        destroyForcibly()
+        terminate()
         // 进程被杀后 stdout/stderr 会关闭, 这里 join 回收两个采集线程, 避免每次取消泄漏一对线程
         stdinWriter?.join(1_000)
         stdout.join(1_000)
@@ -78,7 +110,7 @@ fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): Workspace
     }
 }
 
-private class StreamWriter(
+internal class StreamWriter(
     private val stream: java.io.OutputStream,
     private val bytes: ByteArray,
 ) {
@@ -99,7 +131,7 @@ private class StreamWriter(
     fun join(millis: Long) = thread.join(millis)
 }
 
-private class StreamCollector(
+internal class StreamCollector(
     stream: InputStream,
     private val maxChars: Int = MAX_OUTPUT_CHARS,
 ) {
@@ -142,3 +174,7 @@ private class StreamCollector(
 
     fun text(): String = synchronized(builder) { builder.toString() }
 }
+
+/** POSIX shell 单引号转义 */
+internal fun String.shellQuote(): String =
+    "'" + replace("'", "'\"'\"'") + "'"

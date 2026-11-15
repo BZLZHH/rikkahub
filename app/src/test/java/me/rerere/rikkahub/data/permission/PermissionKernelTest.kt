@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.permission
 
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import me.rerere.workspace.WorkspaceLayout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -122,6 +123,56 @@ class PermissionKernelTest {
         )
         assertTrue(decision is PermissionDecision.Deny)
         assertEquals("unattended", (decision as PermissionDecision.Deny).code)
+    }
+
+    @Test
+    fun newToolsRespectModeAndEnvelope() {
+        fun call(tool: String) = PermissionNormalizer.normalize(
+            tool,
+            buildJsonObject { put("path", "/notes.md"); put("task_id", "task-1"); put("action", "tap") },
+        )
+        listOf("memory_write", "memory_str_replace", "memory_append", "memory_delete", "phone_use").forEach { tool ->
+            assertTrue(tool, PermissionKernel.evaluate(call(tool), context(PermissionMode.ASK)) is PermissionDecision.Ask)
+            assertTrue(tool, PermissionKernel.evaluate(call(tool), context(PermissionMode.PLAN)) is PermissionDecision.Deny)
+        }
+        assertTrue(PermissionKernel.evaluate(call("phone_use"), context(PermissionMode.TRUSTED)) is PermissionDecision.Ask)
+        assertTrue(PermissionKernel.evaluate(call("memory_delete"), context(PermissionMode.EDIT)) is PermissionDecision.Ask)
+        assertTrue(PermissionKernel.evaluate(call("workspace_shell_output"), context(PermissionMode.PLAN)) is PermissionDecision.Allow)
+        assertTrue(PermissionKernel.evaluate(call("workspace_shell_kill"), context(PermissionMode.PLAN)) is PermissionDecision.Deny)
+        assertTrue(PermissionKernel.evaluate(call("workspace_shell_kill"), context(PermissionMode.ASK)) is PermissionDecision.Allow)
+        val denied = PermissionKernel.evaluate(
+            call("phone_use"),
+            context(PermissionMode.FULL, envelope = setOf(ToolEffect.FS_READ)),
+        )
+        assertEquals("out_of_envelope", (denied as PermissionDecision.Deny).code)
+    }
+
+    @Test
+    fun sshOutsideRootsAndEscapingCwdCannotUseAllowRules() {
+        val layout = WorkspaceLayout("/srv/project", listOf("/srv/project", "/tmp"))
+        fun write(path: String) = PermissionNormalizer.normalize(
+            "workspace_write_file",
+            buildJsonObject { put("path", path) },
+            workspaceLayout = layout,
+        )
+        val rules = listOf(PermissionRule(id = "all", tool = "*"))
+        assertTrue(PermissionKernel.evaluate(write("/srv/project/file"), context(PermissionMode.EDIT)) is PermissionDecision.Allow)
+        assertTrue(PermissionKernel.evaluate(write("/workspace/file"), context(PermissionMode.EDIT, rules)) is PermissionDecision.Ask)
+        val outside = PermissionNormalizer.normalize(
+            "workspace_shell",
+            buildJsonObject { put("command", "git status"); put("cwd", "../../etc") },
+            workspaceLayout = layout,
+        )
+        assertTrue(PermissionKernel.evaluate(outside, context(PermissionMode.TRUSTED, rules)) is PermissionDecision.Ask)
+    }
+
+    @Test
+    fun restartingJobsCannotBypassBackgroundDelegationEnvelope() {
+        val restart = PermissionNormalizer.normalize("job_restart", buildJsonObject { put("job_id", "task-1") })
+        val result = PermissionKernel.evaluate(restart, PermissionContext.background())
+        assertEquals("out_of_envelope", (result as PermissionDecision.Deny).code)
+        val input = PermissionNormalizer.normalize("job_send", buildJsonObject { put("job_id", "task-1") })
+        assertTrue(PermissionKernel.evaluate(input, context(PermissionMode.ASK)) is PermissionDecision.Ask)
     }
 
     @Test

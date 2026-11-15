@@ -10,17 +10,18 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 enum class ToolEffect {
-    /** 无副作用（时间、记忆、技能、历史会话……） */
+    /** 无副作用（时间、图表展示、技能说明……）；记忆写删不是只读。 */
     NONE,
+    /** 读取文件、日志或应用数据，不改动目标内容。 */
     FS_READ,
     FS_WRITE,
     FS_DELETE,
     /** 执行任意进程（含其内部的一切） */
     PROC_EXEC,
-    /** 控制已经在跑的执行体（查状态、看日志、停止、重启） */
+    /** 控制已有执行体（停止、移除）；读日志属于 FS_READ，重启与输入命令仍需执行授权。 */
     PROC_CONTROL,
     NET,
-    /** 本机能力：日历、剪贴板、TTS、屏幕使用时间 */
+    /** 设备能力：日历写入、剪贴板、TTS、PhoneUse（含读屏）。 */
     DEVICE,
     /** 向用户提问等交互原语，永远不参与授权判断 */
     HUMAN,
@@ -94,7 +95,7 @@ data class PermissionRule(
 
 sealed interface CallTarget {
     data class Fs(val path: String, val write: Boolean) : CallTarget
-    data class Exec(val segments: List<List<String>>) : CallTarget
+    data class Exec(val segments: List<List<String>>, val cwd: String? = null) : CallTarget
     data class Net(val host: String?) : CallTarget
     data class Device(val kind: String) : CallTarget
 }

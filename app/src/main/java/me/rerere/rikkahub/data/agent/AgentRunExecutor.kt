@@ -3,7 +3,6 @@ package me.rerere.rikkahub.data.agent
 import android.util.Log
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -59,24 +58,29 @@ class AgentRunExecutor(
         val workspace = workspaceRepository.getById(run.workspaceId)
             ?: return RunLaunchResult.NotStarted("workspace not found: " + run.workspaceId)
 
-        val settings = settingsStore.settingsFlowRaw.first()
-        val parentAssistant = settings.assistants.firstOrNull {
-            it.id.toString() == run.assistantId
-        } ?: settings.assistants.firstOrNull()
-            ?: return RunLaunchResult.NotStarted("no assistant available to fork")
-
+        val settings = settingsStore.awaitLoaded()
         val args = runCatching {
             JsonInstant.parseToJsonElement(run.argsJson) as? JsonObject
         }.getOrNull().orEmpty()
+        val snapshot = AgentExecutionSnapshot.fromJson(args[AgentExecutionSnapshot.ARG_KEY])
+        val parentAssistant = snapshot?.assistantFor(workspace.id) ?: kotlin.run {
+            // Compatibility only for runs created before execution snapshots existed.
+            val stored = settings.assistants.firstOrNull { it.id.toString() == run.assistantId }
+                ?: settings.assistants.firstOrNull()
+                ?: return RunLaunchResult.NotStarted("no assistant available to fork")
+            stored.copy(workspaceId = kotlin.uuid.Uuid.parse(workspace.id))
+        }
         val cwd = args["cwd"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
         val maxSteps = args["max_steps"]?.jsonPrimitive?.intOrNull ?: DEFAULT_MAX_STEPS
         val excludeJobTools = args["exclude_job_tools"]?.jsonPrimitive?.contentOrNull == "true"
 
         // 模型: 显式指定优先, 否则回退"快速模型" —— 子代理是内部劳动力, 不该占用主模型
-        val model = settings.findModelById(
+        val selectedModel = settings.findModelById(
             run.modelId?.let { runCatching { kotlin.uuid.Uuid.parse(it) }.getOrNull() },
             settings.fastModelId,
         ) ?: return RunLaunchResult.NotStarted("no model available for subagent")
+        val model = snapshot?.modelFor(selectedModel, explicitOverride = !run.modelId.isNullOrBlank())
+            ?: selectedModel
 
         val groups = AgentToolGroup.parseAll(
             runCatching {

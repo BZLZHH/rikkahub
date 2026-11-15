@@ -15,7 +15,8 @@ import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
 import me.rerere.asr.ASRVoiceTurn
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.service.MessageQueue
+import me.rerere.rikkahub.service.ConversationInbox
+import me.rerere.rikkahub.service.nextMessage
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -40,7 +41,7 @@ class VoiceSessionControllerTest {
 
     private class Rig {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-        val queue = MessageQueue()
+        val queue = ConversationInbox()
         val asrs = mutableListOf<FakeAsr>()
         val replies = mutableListOf<CompletableDeferred<String?>>()
         val spoken = mutableListOf<String>()
@@ -54,7 +55,7 @@ class VoiceSessionControllerTest {
                 queue.enqueue(listOf(UIMessagePart.Text(text)), reply = it)
             }
         }
-        fun start() = voice.start(
+        fun start(listenWhileReplying: Boolean = true) = voice.start(
             { FakeAsr().also { asrs.add(it) } },
             {
                 assertTrue(asrs.all { asr -> asr.disposed })
@@ -63,6 +64,7 @@ class VoiceSessionControllerTest {
                 playback.await()
             },
             { stopCount++ },
+            listenWhileReplying,
         )
         suspend fun recorder(after: FakeAsr? = null): FakeAsr {
             awaitCondition {
@@ -102,7 +104,7 @@ class VoiceSessionControllerTest {
             val first = rig.recorder()
             first.end("first")
             val second = rig.recorder(first)
-            val generating = rig.queue.takeNext()!!
+            val generating = rig.queue.nextMessage()!!
             assertFalse(generating.reply!!.isCompleted)
             second.end("second")
             val third = rig.recorder(second)
@@ -112,6 +114,55 @@ class VoiceSessionControllerTest {
                 (it.parts.single() as UIMessagePart.Text).text
             })
             assertEquals(3, rig.voice.state.value.pendingReplies)
+            assertTrue(rig.spoken.isEmpty())
+        } finally { rig.close() }
+    }
+
+    @Test fun `turn-based mode without TTS reopens the microphone only after the reply`() = runBlocking<Unit> {
+        val rig = Rig()
+        try {
+            rig.voice.start(
+                createAsr = { FakeAsr().also { rig.asrs.add(it) } },
+                speak = null,
+                stopSpeaking = {},
+                listenWhileReplying = false,
+            )
+            val first = rig.recorder()
+            first.end("first")
+            awaitCondition { rig.voice.state.value.phase == VoicePhase.Waiting }
+            assertEquals(1, rig.asrs.size)
+            assertTrue(first.disposed)
+            rig.replies.single().complete("reply")
+            rig.recorder(first)
+            assertEquals(0, rig.voice.state.value.pendingReplies)
+        } finally { rig.close() }
+    }
+
+    @Test fun `turn-based mode with TTS reopens the microphone only after playback`() = runBlocking<Unit> {
+        val rig = Rig()
+        try {
+            rig.start(listenWhileReplying = false)
+            val first = rig.recorder()
+            first.end("first")
+            awaitCondition { rig.voice.state.value.phase == VoicePhase.Waiting }
+            rig.replies.single().complete("reply")
+            awaitCondition { rig.voice.state.value.phase == VoicePhase.Speaking }
+            assertEquals(1, rig.asrs.size)
+            rig.playback.complete(Unit)
+            rig.recorder(first)
+            assertEquals(listOf("reply"), rig.spoken)
+        } finally { rig.close() }
+    }
+
+    @Test fun `turn-based mode resumes listening when the utterance is withdrawn`() = runBlocking<Unit> {
+        val rig = Rig()
+        try {
+            rig.start(listenWhileReplying = false)
+            val first = rig.recorder()
+            first.end("withdraw")
+            awaitCondition { rig.voice.state.value.phase == VoicePhase.Waiting }
+            rig.queue.remove(rig.queue.state.value.messages.single().id)
+            rig.recorder(first)
             assertTrue(rig.spoken.isEmpty())
         } finally { rig.close() }
     }

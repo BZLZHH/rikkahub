@@ -15,8 +15,8 @@ RikkaHub Enhanced 跟随上游 RikkaHub，并针对**长时间无人值守运行
 | | |
 |---|---|
 | 应用 ID | `me.rerere.rikkahub.enhanced` |
-| 当前版本 | `2.5.4-rhe.1.0`（versionCode `189001`） |
-| 上游基线 | RikkaHub `2.5.4`（versionCode `189`） |
+| 当前版本 | `3.2.0-rhe.1.0`（versionCode `196001`） |
+| 上游基线 | RikkaHub `3.2.0`（versionCode `196`） |
 | 许可证 | AGPL-3.0 |
 
 ## 相比上游新增
@@ -28,7 +28,7 @@ RikkaHub Enhanced 跟随上游 RikkaHub，并针对**长时间无人值守运行
 增量读取日志、等待、停止、重启、删除。同时提供可复用的任务定义与参数、定时触发（延迟 / 周期 / cron）、
 可交互 pty 模式、完成通知，以及任务结束后按需唤醒会话。
 
-**工具调用自动审批。** 高影响工具的审批可交由指定模型判断；判断不确定时仍然询问用户。
+**工具权限。** 聊天、子代理和工作流统一使用权限内核，按所选权限模式与已保存规则判断工具调用。
 
 **上游修复。** 修复了上游存在的导航崩溃（`NavDisplay backstack cannot be empty`）。
 
@@ -37,7 +37,7 @@ RikkaHub Enhanced 跟随上游 RikkaHub，并针对**长时间无人值守运行
 发布时会在 [Releases](https://github.com/BZLZHH/rikkahub/releases) 附带 APK。
 
 ```bash
-adb install -r app-universal-release.apk
+adb install -r app-github-universal-release.apk
 ```
 
 应用 ID 与官方版不同，两者可同时安装；原地覆盖升级需要相同签名。
@@ -47,7 +47,7 @@ adb install -r app-universal-release.apk
 依赖：JDK 21、Android SDK（compileSdk 37）。
 
 ```bash
-./gradlew :app:assembleRelease
+./gradlew :app:assembleGithubRelease
 ```
 
 仓库不包含 `app/google-services.json`，构建 release 变体前请自行提供 Firebase 配置。

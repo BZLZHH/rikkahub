@@ -3,9 +3,12 @@ package me.rerere.rikkahub.data.permission
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.workspace.WorkspaceLayout
+import me.rerere.workspace.WorkspaceStorageArea
 import java.util.ArrayDeque
 import java.util.UUID
 
@@ -17,47 +20,73 @@ import java.util.UUID
  */
 object PermissionNormalizer {
 
-    /** 与 WorkspaceTools 里历史的安全区保持一致：这里写文件不需要额外同意。 */
+    /** 旧调用方的本地默认值；统一入口传入真实 layout，SSH 不继承本地可写目录。 */
     private val WRITABLE_ROOTS = listOf("/workspace", "/tmp", "/skills")
 
     private val NONE_TOOLS = setOf(
-        "get_time_info", "get_screen_time", "text_to_speech", "calendar_query",
-        "conversation_search", "recent_chats", "memory_tool", "use_skill",
+        "get_time_info", "chart_display", "use_skill",
     )
 
     fun effectsOf(tool: String): Set<ToolEffect> = when {
-        tool == "workspace_read_file" -> setOf(ToolEffect.FS_READ)
+        tool in setOf(
+            "workspace_read_file", "workspace_shell_output", "memory_read", "memory_list",
+            "conversation_search", "conversation_read", "recent_chats", "calendar_query", "get_screen_time",
+            "job_list", "job_status", "job_logs", "job_wait", "job_screen", "job_def_list",
+            "subagent_status", "subagent_result", "workflow_status",
+        ) -> setOf(ToolEffect.FS_READ)
+        tool == "workspace_shell_kill" -> setOf(ToolEffect.PROC_CONTROL)
+        tool in setOf("memory_write", "memory_str_replace", "memory_append") -> setOf(ToolEffect.FS_WRITE)
+        tool == "memory_delete" -> setOf(ToolEffect.FS_DELETE)
         tool == "workspace_write_file" || tool == "workspace_edit_file" -> setOf(ToolEffect.FS_WRITE)
         tool == "workspace_shell" -> setOf(ToolEffect.PROC_EXEC)
-        tool == "job_start" || tool == "job_run" -> setOf(ToolEffect.DELEGATE, ToolEffect.PROC_EXEC)
+        tool in setOf("job_start", "job_run", "job_restart") -> setOf(ToolEffect.DELEGATE, ToolEffect.PROC_EXEC)
+        tool == "job_send" -> setOf(ToolEffect.PROC_EXEC)
         tool == "job_def_create" || tool == "job_def_update" -> setOf(ToolEffect.DELEGATE)
-        tool.startsWith("job_") -> setOf(ToolEffect.PROC_CONTROL)
+        tool in setOf("job_kill", "job_remove", "job_def_remove") -> setOf(ToolEffect.PROC_CONTROL)
         tool == "subagent_start" -> setOf(ToolEffect.DELEGATE)
-        tool.startsWith("subagent_") -> setOf(ToolEffect.PROC_CONTROL)
+        tool == "subagent_kill" -> setOf(ToolEffect.PROC_CONTROL)
         tool == "workflow_run" -> setOf(ToolEffect.DELEGATE)
-        tool.startsWith("workflow_") -> setOf(ToolEffect.PROC_CONTROL)
+        tool == "workflow_kill" -> setOf(ToolEffect.PROC_CONTROL)
         tool.startsWith("mcp__") -> setOf(ToolEffect.EXTERNAL)
         tool == "search_web" || tool == "scrape_web" -> setOf(ToolEffect.NET)
         tool == "ask_user" -> setOf(ToolEffect.HUMAN)
-        tool == "calendar_create" -> setOf(ToolEffect.DEVICE)
-        tool == "clipboard_tool" -> setOf(ToolEffect.DEVICE)
+        tool in setOf("calendar_create", "clipboard_tool", "text_to_speech", "phone_use") -> setOf(ToolEffect.DEVICE)
         tool == "eval_javascript" -> setOf(ToolEffect.PROC_EXEC)
         tool in NONE_TOOLS -> setOf(ToolEffect.NONE)
         else -> setOf(ToolEffect.UNKNOWN)
     }
 
-    fun normalize(tool: String, args: JsonElement): NormalizedCall {
+    fun normalize(
+        tool: String,
+        args: JsonElement,
+        workspaceLayout: WorkspaceLayout? = null,
+        workspaceCwd: String? = null,
+    ): NormalizedCall {
+        val layout = workspaceLayout ?: WorkspaceLayout("/workspace", WRITABLE_ROOTS)
         val obj = args as? JsonObject ?: JsonObject(emptyMap())
         val effects = effectsOf(tool)
         return when {
-            tool == "workspace_shell" -> normalizeShell(tool, obj, effects)
-            tool == "workspace_read_file" -> normalizePath(tool, obj, write = false)
+            tool == "workspace_shell" -> normalizeShell(tool, obj, effects, layout, workspaceCwd)
+            tool == "workspace_read_file" -> normalizePath(tool, obj, write = false, layout = layout)
             tool == "workspace_write_file" || tool == "workspace_edit_file" ->
-                normalizePath(tool, obj, write = true)
+                normalizePath(tool, obj, write = true, layout = layout)
+            tool == "workspace_shell_output" || tool == "workspace_shell_kill" -> NormalizedCall(
+                tool = tool,
+                effects = effects,
+                opaque = obj.string("task_id").isBlank(),
+                summary = (if (tool == "workspace_shell_output") "读取后台命令输出：" else "终止后台命令：") +
+                    obj.string("task_id").ifBlank { "（未提供任务 ID）" },
+            )
             tool == "job_start" || tool == "job_run" -> normalizeJob(tool, obj, effects)
             tool == "job_def_create" || tool == "job_def_update" -> normalizeJobDef(tool, obj, effects)
             tool == "subagent_start" -> normalizeSubagent(obj, effects)
             tool == "workflow_run" -> normalizeWorkflow(obj, effects)
+            tool == "phone_use" -> NormalizedCall(
+                tool = tool,
+                effects = effects,
+                targets = listOf(CallTarget.Device("phone:" + obj.string("action"))),
+                summary = "操作手机：" + obj.string("action").ifBlank { "（未提供动作）" },
+            )
             tool.startsWith("mcp__") -> NormalizedCall(
                 tool = tool,
                 effects = effects,
@@ -133,27 +162,40 @@ object PermissionNormalizer {
         tool: String,
         obj: JsonObject,
         effects: Set<ToolEffect>,
+        layout: WorkspaceLayout,
+        defaultCwd: String?,
     ): NormalizedCall {
         val command = obj.string("command")
         val parsed = parseShell(command)
+        // 显式 cwd 替代会话 cwd；两者都是相对 workspaceDir，而非彼此相对。
+        val rawCwd = (obj["cwd"] as? JsonPrimitive)?.contentOrNull ?: defaultCwd.orEmpty()
+        val relativeCwd = layout.relativeToWorkspace(rawCwd)
+        val cwd = normalizePathString(layout.absolutePath(WorkspaceStorageArea.FILES, relativeCwd))
+        val root = normalizePathString(layout.workspaceDir)
         return NormalizedCall(
             tool = tool,
             effects = effects,
-            targets = if (parsed.segments.isEmpty()) emptyList() else listOf(CallTarget.Exec(parsed.segments)),
-            opaque = parsed.opaque || command.isBlank(),
-            summary = shellSummary(command, parsed),
+            targets = if (parsed.segments.isEmpty()) emptyList() else listOf(CallTarget.Exec(parsed.segments, cwd)),
+            opaque = parsed.opaque || command.isBlank() || rawCwd.contains(0.toChar()) ||
+                !isWithin(cwd, root),
+            summary = shellSummary(command, parsed) + "（目录：" + cwd + "）",
         )
     }
 
-    private fun normalizePath(tool: String, obj: JsonObject, write: Boolean): NormalizedCall {
-        val raw = obj.string("path")
+    private fun normalizePath(
+        tool: String,
+        obj: JsonObject,
+        write: Boolean,
+        layout: WorkspaceLayout,
+    ): NormalizedCall {
+        val raw = obj.string("path").trim()
         val path = normalizePathString(raw)
-        val writable = WRITABLE_ROOTS.any { path == it || path.startsWith(it + "/") }
+        val writable = layout.writableRoots.any { isWithin(path, normalizePathString(it)) }
         return NormalizedCall(
             tool = tool,
             effects = setOf(if (write) ToolEffect.FS_WRITE else ToolEffect.FS_READ),
             targets = listOf(CallTarget.Fs(path, write)),
-            opaque = path.isBlank() || (write && !writable),
+            opaque = !path.startsWith("/") || raw.contains(0.toChar()) || (write && !writable),
             summary = (if (write) "写入 " else "读取 ") + path.ifBlank { "（未提供路径）" },
         )
     }
@@ -254,12 +296,19 @@ object PermissionNormalizer {
         "get_screen_time" -> "读取屏幕使用时间"
         "get_time_info" -> "读取当前时间"
         "eval_javascript" -> "执行 JavaScript 片段"
+        "job_restart" -> "重新启动后台任务"
+        "job_send" -> "向后台终端发送输入"
         "ask_user" -> "向你提问"
         "search_web" -> "联网搜索"
         "scrape_web" -> "抓取网页"
         "conversation_search" -> "检索历史会话"
         "recent_chats" -> "参考历史会话"
-        "memory_tool" -> "读写记忆"
+        "memory_tool" -> "读写记忆（旧工具）"
+        "memory_read", "memory_list" -> "读取记忆"
+        "memory_write", "memory_str_replace", "memory_append" -> "写入记忆"
+        "memory_delete" -> "删除记忆"
+        "conversation_read" -> "读取历史会话"
+        "chart_display" -> "展示图表"
         "use_skill" -> "使用技能"
         else -> tool
     }
@@ -372,6 +421,9 @@ object PermissionNormalizer {
         return if (line.length > 60) line.take(60) + "…" else line
     }
 
+    private fun isWithin(path: String, root: String): Boolean =
+        root.startsWith("/") && (root == "/" || path == root || path.startsWith("$root/"))
+
     private fun normalizePathString(raw: String): String {
         if (raw.isBlank()) return ""
         val unified = raw.replace('\\', '/')
@@ -389,8 +441,8 @@ object PermissionNormalizer {
     }
 
     private fun JsonObject.string(key: String): String =
-        this[key]?.jsonPrimitive?.contentOrNull.orEmpty()
+        (this[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
 
     private fun JsonObject.long(key: String): Long? =
-        this[key]?.jsonPrimitive?.let { it.intOrNull?.toLong() }
+        (this[key] as? JsonPrimitive)?.intOrNull?.toLong()
 }

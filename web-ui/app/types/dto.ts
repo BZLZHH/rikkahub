@@ -1,5 +1,7 @@
 import type { TokenUsage } from "./core";
 import type { UIMessageAnnotation } from "./annotations";
+import type { ConversationConfig } from "./conversation";
+import type { ModelSnapshot } from "./message";
 import type { UIMessagePart } from "./parts";
 
 export interface ConversationListDto {
@@ -70,8 +72,17 @@ export interface MessageDto {
   createdAt: string;
   finishedAt?: string | null;
   modelId?: string | null;
+  modelSnapshot?: ModelSnapshot | null;
   usage?: TokenUsage | null;
+  /** 模型实际生成耗时（毫秒），不含首 token 延迟、工具执行和审批等待 */
+  generationTimeMs?: number | null;
+  /** 最后一次请求自己的 usage；usage 是多步工具调用的累计值 */
+  lastUsage?: TokenUsage | null;
+  /** 这条消息累计请求了多少次模型 */
+  stepCount?: number | null;
   translation?: string | null;
+  /** 压缩检查点：此消息是它之前全部历史的摘要，之前的消息不再发送给模型 */
+  isContextCheckpoint?: boolean;
 }
 
 export interface MessageNodeDto {
@@ -90,6 +101,7 @@ export interface ConversationDto {
   customSystemPrompt?: string | null;
   modeInjectionIds?: string[];
   lorebookIds?: string[];
+  config?: ConversationConfig | null;
   workspaceCwd?: string | null;
   folderId?: string | null;
   createAt: number;

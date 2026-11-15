@@ -46,6 +46,7 @@ import {
   type ProviderModel,
   type Settings,
   type UIMessagePart,
+  isNoticeOnly,
 } from "~/types";
 import { MessageSquare } from "lucide-react";
 import Logo from "~/components/logo";
@@ -113,6 +114,8 @@ function getQuickJumpPreview(
   if (!fallbackPart) return t("conversations.preview.empty_message");
 
   switch (fallbackPart.type) {
+    case "notice":
+      return truncatePreviewText(fallbackPart.title.trim());
     case "image":
       return t("conversations.preview.image");
     case "video":
@@ -421,15 +424,15 @@ function useDraftInputController({
   isHomeRoute,
   homeDraftId,
   setHomeDraftId,
-  useConversationPromptInjection,
+  folderId,
   navigate,
   refreshList,
 }: {
   activeId: string | null;
   isHomeRoute: boolean;
   homeDraftId: string;
+  folderId: string | null;
   setHomeDraftId: React.Dispatch<React.SetStateAction<string>>;
-  useConversationPromptInjection: boolean;
   navigate: ReturnType<typeof useNavigate>;
   refreshList: () => void;
 }) {
@@ -442,7 +445,6 @@ function useDraftInputController({
   const addDraftParts = useChatInputStore((state) => state.addParts);
   const removeDraftPart = useChatInputStore((state) => state.removePartAt);
   const getSubmitParts = useChatInputStore((state) => state.getSubmitParts);
-  const getPromptInjectionIds = useChatInputStore((state) => state.getPromptInjectionIds);
   const clearDraft = useChatInputStore((state) => state.clearDraft);
 
   const inputText = draft?.text ?? "";
@@ -486,16 +488,10 @@ function useDraftInputController({
 
     const conversationId = uuidv4();
     setHomeDraftId(createHomeDraftId());
-    const promptInjectionIds = getPromptInjectionIds(draftKey);
 
     await api.post<{ status: string }>(`conversations/${conversationId}/messages`, {
       parts,
-      ...(useConversationPromptInjection
-        ? {
-            modeInjectionIds: promptInjectionIds.modeInjectionIds,
-            lorebookIds: promptInjectionIds.lorebookIds,
-          }
-        : {}),
+      folderId,
     });
     clearDraft(draftKey);
 
@@ -505,12 +501,11 @@ function useDraftInputController({
     activeId,
     clearDraft,
     draftKey,
-    getPromptInjectionIds,
+    folderId,
     getSubmitParts,
     navigate,
     refreshList,
     setHomeDraftId,
-    useConversationPromptInjection,
   ]);
 
   const replaceDraft = React.useCallback(
@@ -677,11 +672,13 @@ const ConversationTimeline = React.memo(
 
         {canQuickJump ? (
           <ConversationQuickJump
-            items={selectedNodeMessages.map(({ message }) => ({
-              id: message.id,
-              role: message.role,
-              preview: getQuickJumpPreview(message, t),
-            }))}
+            items={selectedNodeMessages
+              .filter(({ message }) => !isNoticeOnly(message))
+              .map(({ message }) => ({
+                id: message.id,
+                role: message.role,
+                preview: getQuickJumpPreview(message, t),
+              }))}
           />
         ) : null}
 
@@ -720,7 +717,6 @@ function ConversationsPageInner() {
   const { panel, closePanel } = useWorkbench();
 
   const { settings, assistants, currentAssistantId, currentAssistant } = useCurrentAssistant();
-  const { currentModel, currentProvider } = useCurrentModel();
   const {
     folders,
     selectedFolderId,
@@ -752,6 +748,7 @@ function ConversationsPageInner() {
 
   const { detail, detailLoading, detailError, selectedNodeMessages, resetDetail } =
     useConversationDetail(activeId, updateConversationSummary);
+  const { currentModel, currentProvider } = useCurrentModel(detail);
 
   const {
     draftKey,
@@ -769,7 +766,7 @@ function ConversationsPageInner() {
     isHomeRoute,
     homeDraftId,
     setHomeDraftId,
-    useConversationPromptInjection: currentAssistant?.allowConversationPromptInjection === true,
+    folderId: selectedFolderId,
     navigate,
     refreshList,
   });
@@ -1094,7 +1091,6 @@ function ConversationsPageInner() {
           value={inputText}
           attachments={inputAttachments}
           conversation={detail}
-          draftKey={draftKey}
           ready={draftKey !== null}
           isGenerating={detail?.isGenerating ?? false}
           disabled={detailLoading || Boolean(detailError)}

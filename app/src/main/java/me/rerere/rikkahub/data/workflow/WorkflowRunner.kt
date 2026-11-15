@@ -6,7 +6,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -22,6 +21,8 @@ import me.rerere.rikkahub.data.db.dao.WorkflowRunDAO
 import me.rerere.rikkahub.data.db.entity.WorkflowAgentEntity
 import me.rerere.rikkahub.data.db.entity.WorkflowAgentResultEntity
 import me.rerere.rikkahub.data.agent.AgentRunExecutor
+import me.rerere.rikkahub.data.agent.AgentExecutionSnapshot
+import me.rerere.rikkahub.data.agent.AgentTranscriptStore
 import me.rerere.rikkahub.data.datastore.ModelResolution
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -39,6 +40,7 @@ data class WorkflowRunRequest(
     val workspaceId: String,
     val conversationId: String? = null,
     val assistantId: String? = null,
+    val executionSnapshot: AgentExecutionSnapshot? = null,
     /** 内联脚本; 与 [name] 二选一 */
     val source: String? = null,
     /** 已保存的脚本名（/workspace/.rhe/workflows/<name>.js）; 与 [source] 二选一 */
@@ -117,6 +119,7 @@ class WorkflowRunner(
     private val settingsStore: SettingsStore,
     /** 结束时把结果播出去: 通知与唤醒都靠它（见 BackgroundRunCompletionManager）。 */
     private val appEventBus: AppEventBus,
+    private val transcripts: AgentTranscriptStore,
 ) {
     private val jobs = ConcurrentHashMap<String, Job>()
 
@@ -155,7 +158,7 @@ class WorkflowRunner(
 
         // 模型: 显式指定 -> 主会话当前模型 -> 快速模型。
         // 解析失败**不要静默退回默认**: 那样"我明明指定了 Pro"会变成一个说不清的谜。
-        val settings = settingsStore.settingsFlowRaw.first()
+        val settings = settingsStore.awaitLoaded()
         val explicit = settings.resolveModelSpec(request.modelSpec)
         if (explicit is ModelResolution.NotFound) {
             return WorkflowStartResult.Rejected(
@@ -166,9 +169,17 @@ class WorkflowRunner(
         val sessionModelId = request.defaultModelId
             ?.let { runCatching { Uuid.parse(it) }.getOrNull() }
         val chosenModel = (explicit as? ModelResolution.Resolved)?.model
+            ?: request.executionSnapshot?.model
             ?: settings.findModelById(sessionModelId, settings.fastModelId)
+        val snapshot = request.executionSnapshot?.let {
+            it.copy(model = chosenModel ?: it.model, workspaceCwd = request.cwd ?: it.workspaceCwd)
+        }
 
         val runId = Uuid.random().toString()
+        if (snapshot != null) {
+            runCatching { transcripts.writeExecutionSnapshot(runId, snapshot) }
+                .getOrElse { return WorkflowStartResult.Rejected(describe(it)) }
+        }
         val now = System.currentTimeMillis()
         // 标题优先于 meta.name: 内联脚本往往没有 meta, 不填标题界面上就全是 "(inline workflow)"
         val displayName = request.title?.trim()?.takeIf { it.isNotBlank() } ?: script.displayName
@@ -195,7 +206,7 @@ class WorkflowRunner(
         completions[runId] = completion
         val job = scope.launch {
             try {
-                val result = executeScript(runId, request, script, chosenModel?.id)
+                val result = executeScript(runId, request.copy(executionSnapshot = snapshot), script, chosenModel?.id)
                 withContext(NonCancellable) {
                     val finishedAt = System.currentTimeMillis()
                     val row = dao.getById(runId)
@@ -280,7 +291,7 @@ class WorkflowRunner(
             }
         }
         try {
-            val agentConcurrency = settingsStore.settingsFlowRaw.first().maxConcurrentAgents
+            val agentConcurrency = settingsStore.awaitLoaded().maxConcurrentAgents
             val runtime = WorkflowRuntime(
                 agentHandler = WorkflowAgentHandler { call, observer ->
                     invoker.run(
@@ -289,8 +300,10 @@ class WorkflowRunner(
                         modelId = modelId,
                         conversationId = request.conversationId,
                         assistantId = request.assistantId,
+                        workspaceId = request.workspaceId,
                         cwd = request.cwd,
                         maxSteps = request.maxSteps,
+                        executionSnapshot = request.executionSnapshot,
                     )
                 },
                 progress = progress,
@@ -540,14 +553,17 @@ class WorkflowRunner(
         val observer = tracker.start(call, reused = false)
         // 模型用这一行当初记下的 id; 解析不出来就交给 invoker 的默认（快速模型）
         val modelId = agent.modelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+        val snapshot = transcripts.readExecutionSnapshot(runId)
         val text = invoker.run(
             call = call,
             observer = observer,
             modelId = modelId,
             conversationId = run.conversationId,
             assistantId = run.assistantId,
-            cwd = null,
+            workspaceId = run.workspaceId,
+            cwd = snapshot?.workspaceCwd,
             maxSteps = AgentRunExecutor.DEFAULT_MAX_STEPS,
+            executionSnapshot = snapshot,
         )
         val success = text != null
         tracker.finish(

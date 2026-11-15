@@ -12,8 +12,12 @@ import me.rerere.rikkahub.data.db.dao.AgentRunDAO
 import me.rerere.rikkahub.data.db.dao.FolderDAO
 import me.rerere.rikkahub.data.db.dao.GenMediaDAO
 import me.rerere.rikkahub.data.db.dao.ManagedFileDAO
+import me.rerere.rikkahub.data.db.dao.MediaCreationDAO
+import me.rerere.rikkahub.data.db.dao.MemoryConsolidationDAO
 import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
+import me.rerere.rikkahub.data.db.dao.TranslationHistoryDAO
+import me.rerere.rikkahub.data.db.dao.UsageRecordDAO
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
 import me.rerere.rikkahub.data.db.dao.WorkspaceJobDAO
 import me.rerere.rikkahub.data.db.dao.WorkflowRunDAO
@@ -22,8 +26,14 @@ import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.FolderEntity
 import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
-import me.rerere.rikkahub.data.db.entity.MemoryEntity
+import me.rerere.rikkahub.data.db.entity.MediaCreationNodeEntity
+import me.rerere.rikkahub.data.db.entity.MediaCreationRecordEntity
+import me.rerere.rikkahub.data.db.entity.MediaCreationSessionEntity
+import me.rerere.rikkahub.data.db.entity.MemoryConsolidationEntity
+import me.rerere.rikkahub.data.db.entity.MemoryFileEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
+import me.rerere.rikkahub.data.db.entity.TranslationHistoryEntity
+import me.rerere.rikkahub.data.db.entity.UsageRecordEntity
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.db.entity.AgentRunEntity
 import me.rerere.rikkahub.data.db.entity.WorkspaceJobDefEntity
@@ -39,7 +49,8 @@ import me.rerere.rikkahub.utils.JsonInstant
 @Database(
     entities = [
         ConversationEntity::class,
-        MemoryEntity::class,
+        MemoryFileEntity::class,
+        MemoryConsolidationEntity::class,
         GenMediaEntity::class,
         MessageNodeEntity::class,
         ManagedFileEntity::class,
@@ -49,23 +60,18 @@ import me.rerere.rikkahub.utils.JsonInstant
         WorkspaceJobEntity::class,
         WorkspaceJobDefEntity::class,
         AgentRunEntity::class,
-        // workflow: 运行账目 + 可恢复性存档（后者按「脚本指纹 + 调用序号」存每个 agent 的产出）
         WorkflowRunEntity::class,
         WorkflowAgentResultEntity::class,
-        // 逐 agent 的行: 高可读性 UI 的右栏（标签 / 模型 / token / 耗时 / 子会话 id）
         WorkflowAgentEntity::class,
+        MediaCreationSessionEntity::class,
+        MediaCreationNodeEntity::class,
+        MediaCreationRecordEntity::class,
+        TranslationHistoryEntity::class,
+        UsageRecordEntity::class,
     ],
-    // v29 这个版本号**被复用出过事故**: 早先那套被移除的实现也用过 v29,
-    // 装过它的设备上 user_version 已经是 29, 于是 Room 不跑迁移、直接比对 identity hash 并崩溃。
-    // v30 由 Migration_29_30 把两张表补上（见该文件的注释）。
-    //
-    // v32: workflow_runs 加 modelName（可空, 老行补 NULL 即可）。同样**只加不减**。
-    //
-    // v31: 加"逐 agent 的行"。**绝不复用版本号** —— 30 已经交出去过（用户手上那版 APK 就是 30）,
-    // 复用它会原样重演上面那次事故。
-    //
-    // v35: workflow_runs 加 notify / autoWake（带默认值）。
-    version = 35,
+    // Enhanced shipped v35; upstream shipped a different v33. Never reuse either version.
+    // Versions 25..35 converge through explicit, shape-aware migrations (see MigrationTo36).
+    version = 36,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -86,21 +92,8 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 22, to = 23, spec = Migration_22_23::class),
         AutoMigration(from = 23, to = 24),
         AutoMigration(from = 24, to = 25),
-        AutoMigration(from = 25, to = 26),
-        AutoMigration(from = 26, to = 27),
-        AutoMigration(from = 27, to = 28),
-        // 只新增两张表, 没有改动既有列, 所以是纯粹的自动迁移
-        AutoMigration(from = 28, to = 29),
-        // v30 -> v31: 只新增一张表 + workflow_runs 加一列, 纯自动迁移。
-        AutoMigration(from = 30, to = 31),
-        // v31 -> v32: 只加一列可空列, 纯自动迁移
-        AutoMigration(from = 31, to = 32),
-        // v32 -> v33: workflow_agents 加 reasoning（可空列, 纯自动迁移）
-        AutoMigration(from = 32, to = 33),
-        // v33 -> v34: workflow_agents 加 schemaJson（可空列）, 为了能"照着原样重试"
-        AutoMigration(from = 33, to = 34),
-        // v34 -> v35: workflow_runs 加 notify / autoWake（带默认值, 老行按默认补）
-        AutoMigration(from = 34, to = 35),
+        // Versions 26..33 have incompatible Enhanced/upstream schemas. Do not add
+        // auto migrations across that fork: MigrationTo36 handles both histories.
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -108,6 +101,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun conversationDao(): ConversationDAO
 
     abstract fun memoryDao(): MemoryDAO
+
+    abstract fun memoryConsolidationDao(): MemoryConsolidationDAO
 
     abstract fun genMediaDao(): GenMediaDAO
 
@@ -126,6 +121,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun agentRunDao(): AgentRunDAO
 
     abstract fun workflowRunDao(): WorkflowRunDAO
+
+    abstract fun mediaCreationDao(): MediaCreationDAO
+
+    abstract fun translationHistoryDao(): TranslationHistoryDAO
+
+    abstract fun usageRecordDao(): UsageRecordDAO
 }
 
 object TokenUsageConverter {

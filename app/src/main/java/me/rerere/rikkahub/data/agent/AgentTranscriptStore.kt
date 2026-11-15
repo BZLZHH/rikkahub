@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.agent
 
 import java.io.File
+import me.rerere.rikkahub.utils.JsonInstant
 
 /**
  * 子代理转录的落盘。
@@ -124,10 +125,27 @@ class AgentTranscriptStore(
         }.getOrDefault(emptyList())
     }
 
+    /** Private execution settings are not mixed into model-visible transcript output. */
+    fun writeExecutionSnapshot(runId: String, snapshot: AgentExecutionSnapshot) {
+        val file = File(baseDir, "$runId.execution.json")
+        file.parentFile?.mkdirs()
+        val temp = File(baseDir, "$runId.execution.json.tmp")
+        temp.writeText(JsonInstant.encodeToString(AgentExecutionSnapshot.serializer(), snapshot))
+        check(temp.renameTo(file)) { "Could not persist execution settings for $runId" }
+    }
+
+    fun readExecutionSnapshot(runId: String): AgentExecutionSnapshot? {
+        val file = File(baseDir, "$runId.execution.json")
+        if (!file.isFile) return null // Legacy run. Corrupt snapshots must not silently change settings.
+        return JsonInstant.decodeFromString(AgentExecutionSnapshot.serializer(), file.readText())
+    }
+
     fun delete(runId: String) {
         runCatching { fileFor(runId).delete() }
         runCatching { messagesFileFor(runId).delete() }
         runCatching { liveFileFor(runId).delete() }
+        runCatching { File(baseDir, "$runId.execution.json").delete() }
+        runCatching { File(baseDir, "$runId.execution.json.tmp").delete() }
     }
 
     private fun truncateTail(file: File) {

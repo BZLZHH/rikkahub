@@ -27,7 +27,9 @@ internal data class AgentProgressSnapshot(
 internal fun snapshotOf(messages: List<UIMessage>): AgentProgressSnapshot {
     val usage = messages.asReversed().firstNotNullOfOrNull { it.usage }
     return AgentProgressSnapshot(
-        steps = messages.count { it.role == MessageRole.ASSISTANT },
+        // Upstream keeps every tool/model step in one assistant message.
+        // Missing stepCount is an older transcript containing one message per step.
+        steps = messages.filter { it.role == MessageRole.ASSISTANT }.sumOf { it.stepCount ?: 1 },
         toolCalls = messages.sumOf { it.getTools().size },
         tokensIn = usage?.promptTokens ?: 0,
         tokensOut = usage?.completionTokens ?: 0,

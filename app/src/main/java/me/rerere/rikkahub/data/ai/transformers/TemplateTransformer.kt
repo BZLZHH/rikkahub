@@ -7,6 +7,7 @@ import kotlinx.datetime.toInstant
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.utils.toLocalDate
 import me.rerere.rikkahub.utils.toLocalTime
 import java.io.Reader
@@ -16,42 +17,51 @@ import kotlin.time.toJavaInstant
 
 class TemplateTransformer(
     private val engine: PebbleEngine,
-    private val settingsStore: SettingsStore
+    @Suppress("UNUSED_PARAMETER") settingsStore: SettingsStore,
 ) : InputMessageTransformer {
     override suspend fun transform(
         ctx: TransformerContext,
         messages: List<UIMessage>,
     ): List<UIMessage> {
-        val template = engine.getTemplate(ctx.assistant.id.toString())
-        val timeZone = TimeZone.currentSystemDefault()
-        return messages.map { message ->
-            if (message.isSynthetic) return@map message
+        return renderMessagesWithTemplate(engine, ctx.assistant, messages)
+    }
+}
 
-            // 使用消息本身的发送时间而不是当前时间, 保证多次请求时渲染结果稳定, 不破坏 prompt 缓存
-            val createdAt = message.createdAt.toInstant(timeZone).toJavaInstant()
-            message.copy(
-                parts = message.parts.map { part ->
-                    when (part) {
-                        is UIMessagePart.Text -> {
-                            val result = StringWriter()
-                            template.evaluate(
-                                result, mapOf(
-                                    "message" to part.text,
-                                    "role" to message.role.name.lowercase(),
-                                    "time" to createdAt.toLocalTime(),
-                                    "date" to createdAt.toLocalDate(),
-                                )
-                            )
-                            part.copy(
-                                text = result.toString()
-                            )
-                        }
+/** Render the effective run configuration without reloading a different parent template by id. */
+internal fun renderMessagesWithTemplate(
+    engine: PebbleEngine,
+    assistant: Assistant,
+    messages: List<UIMessage>,
+): List<UIMessage> {
+    val template = engine.getLiteralTemplate(assistant.messageTemplate)
+    val timeZone = TimeZone.currentSystemDefault()
+    return messages.map { message ->
+        if (message.isSynthetic) return@map message
 
-                        else -> part
+        // 使用消息本身的发送时间而不是当前时间, 保证多次请求时渲染结果稳定, 不破坏 prompt 缓存
+        val createdAt = message.createdAt.toInstant(timeZone).toJavaInstant()
+        message.copy(
+            parts = message.parts.map { part ->
+                when (part) {
+                    is UIMessagePart.Text -> {
+                        val result = StringWriter()
+                        template.evaluate(
+                            result, mapOf(
+                                "message" to part.text,
+                                "role" to message.role.name.lowercase(),
+                                "time" to createdAt.toLocalTime(),
+                                "date" to createdAt.toLocalDate(),
+                            )
+                        )
+                        part.copy(
+                            text = result.toString()
+                        )
                     }
+
+                    else -> part
                 }
-            )
-        }
+            }
+        )
     }
 }
 

@@ -5,6 +5,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 
 class WorkspaceManager(
     private val baseDir: File,
@@ -19,9 +20,18 @@ class WorkspaceManager(
     // 按 target 长度降序, 保证 /a/b 优先于 /a 匹配
     private val sortedBindMounts = bindMounts.sortedByDescending { it.target.trimEnd('/').length }
 
+    val layout = WorkspaceLayout(
+        workspaceDir = ROOTFS_WORKSPACE_DIR,
+        writableRoots = listOf(ROOTFS_WORKSPACE_DIR, "/tmp") +
+            bindMounts.filter { it.writable }.map { it.target.trimEnd('/') },
+    )
+
     init {
         baseDir.mkdirs()
     }
+
+    fun backend(root: String, shellCompatibilityMode: Boolean = false): WorkspaceBackend =
+        LocalWorkspaceBackend(this, root, shellCompatibilityMode)
 
     fun ensureWorkspace(root: String): File {
         val dir = workspaceDir(root)
@@ -42,7 +52,9 @@ class WorkspaceManager(
 
     fun tempDir(root: String): File = File(workspaceDir(root), TEMP_DIR)
 
-    fun hasRootfs(root: String): Boolean = File(linuxDir(root), "bin/sh").isFile
+    fun hasRootfs(root: String): Boolean = isUsableRootfs(linuxDir(root))
+
+    fun rootfsShell(root: String): String = rootfsShell(linuxDir(root))
 
     fun deleteWorkspace(root: String): Boolean = workspaceDir(root).deleteRecursively()
 
@@ -156,7 +168,8 @@ class WorkspaceManager(
         outputStream.use { out -> file.inputStream().use { it.copyTo(out) } }
     }
 
-    private fun resolveRootfsFile(root: String, path: String): File {
+    /** Rootfs 内绝对路径对应的宿主机文件, 不检查是否存在 */
+    fun resolveRootfsFile(root: String, path: String): File {
         val location = resolveRootfsPath(root, path)
         return fileSystem.resolve(location.rootDir, location.relativePath)
     }
@@ -197,28 +210,72 @@ class WorkspaceManager(
         timeoutMillis: Long = DEFAULT_COMMAND_TIMEOUT_MS,
         stdin: ByteArray? = null,
         shellCompatibilityMode: Boolean = false,
-    ): WorkspaceCommandResult {
+    ): WorkspaceCommandResult =
+        shellRunner.execute(shellContext(root, command, cwd, timeoutMillis, stdin, shellCompatibilityMode))
+
+    fun startBackgroundCommand(
+        root: String,
+        command: String,
+        cwd: String,
+        id: String,
+        shellCompatibilityMode: Boolean = false,
+    ): WorkspaceBackgroundCommand =
+        shellRunner.startBackground(shellContext(root, command, cwd, 0, null, shellCompatibilityMode), id)
+
+    private fun shellContext(
+        root: String,
+        command: String,
+        cwd: String,
+        timeoutMillis: Long,
+        stdin: ByteArray?,
+        shellCompatibilityMode: Boolean,
+    ): WorkspaceShellContext {
         require(command.isNotBlank()) { "Command is required" }
         val workingDir = fileSystem.resolve(filesDir(root), cwd)
         require(workingDir.exists()) { "Working directory does not exist: $cwd" }
         require(workingDir.isDirectory) { "Working path is not a directory: $cwd" }
 
-        return shellRunner.execute(
-            WorkspaceShellContext(
-                root = root,
-                command = command,
-                cwd = cwd,
+        return WorkspaceShellContext(
+            root = root,
+            command = command,
+            cwd = cwd,
+            filesDir = filesDir(root),
+            linuxDir = linuxDir(root),
+            tempDir = tempDir(root),
+            workingDir = workingDir,
+            timeoutMillis = timeoutMillis,
+            stdin = stdin,
+            bindMounts = bindMounts,
+            shellCompatibilityMode = shellCompatibilityMode,
+        )
+    }
+
+    /** 交互式终端启动前的准备: 补齐目录, 并按当前网络刷新 Rootfs 的 DNS 等配置 */
+    fun prepareTerminal(root: String, nameservers: List<String>) {
+        ensureWorkspace(root)
+        bindMounts.forEach { it.source.mkdirs() }
+        RootfsPatcher().patch(linuxDir(root), RootfsPatchOptions(nameservers = nameservers))
+    }
+
+    fun terminalLaunch(
+        root: String,
+        shellCompatibilityMode: Boolean,
+        command: String? = null,
+        cwd: String = "",
+        extraEnv: Map<String, String> = emptyMap(),
+    ): WorkspaceTerminalLaunch? =
+        shellRunner.terminalLaunch(
+            WorkspaceTerminalContext(
                 filesDir = filesDir(root),
                 linuxDir = linuxDir(root),
                 tempDir = tempDir(root),
-                workingDir = workingDir,
-                timeoutMillis = timeoutMillis,
-                stdin = stdin,
                 bindMounts = bindMounts,
                 shellCompatibilityMode = shellCompatibilityMode,
+                command = command,
+                cwd = cwd,
+                extraEnv = extraEnv,
             )
         )
-    }
 
     /**
      * 启动一个后台任务进程: 不等待、输出直接写进调用方给的流。
@@ -294,10 +351,28 @@ class WorkspaceManager(
         /** Rootfs 内工作区文件区的挂载点 */
         const val ROOTFS_WORKSPACE_DIR = "/workspace"
 
+        /** Rootfs 内执行命令时的 HOME */
+        const val ROOTFS_HOME_DIR = "/root"
+
         /** 由宿主机透传的内核伪文件系统, 只能通过 shell 访问 */
         val KERNEL_FS_MOUNTS = listOf("/dev", "/proc", "/sys")
 
         private val ROOT_NAME_REGEX = Regex("[A-Za-z0-9._-]+")
+
+        /** Rootfs 是否可用, 以 /bin/sh 存在为准 */
+        fun isUsableRootfs(linuxDir: File): Boolean =
+            linuxDir.isDirectory && linuxDir.hasRootfsEntry("bin/sh")
+
+        /** Rootfs 内使用的 shell: 优先 bash, 没有时 (如 Alpine minirootfs) 回退到 /bin/sh */
+        fun rootfsShell(linuxDir: File): String =
+            if (linuxDir.hasRootfsEntry("bin/bash")) "/bin/bash" else "/bin/sh"
+
+        // Alpine 等发行版的 /bin/sh 是指向 /bin/busybox 的绝对路径软链, 在宿主机上解析不到目标,
+        // 只有 proot 内才能正确解析, 所以软链本身存在即视为存在
+        private fun File.hasRootfsEntry(path: String): Boolean {
+            val entry = File(this, path)
+            return entry.isFile || Files.isSymbolicLink(entry.toPath())
+        }
     }
 }
 

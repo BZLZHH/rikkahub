@@ -34,16 +34,16 @@ class HistoryVM(
         Log.e(TAG, "Error: ${it.message}")
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    fun deleteConversation(conversation: Conversation) {
+    fun deleteConversations(conversationIds: Collection<Uuid>) {
         viewModelScope.launch {
-            conversationRepo.deleteConversation(conversation)
+            conversationIds.forEach { chatService.deleteConversation(it) }
         }
     }
 
     fun deleteAllConversations() {
         val assistant = assistant.value ?: return
         viewModelScope.launch {
-            conversationRepo.deleteConversationOfAssistant(assistant.id)
+            chatService.deleteConversationsOfAssistant(assistant.id)
         }
     }
 
@@ -55,14 +55,4 @@ class HistoryVM(
 
     fun getPinnedConversations(): Flow<List<Conversation>> =
         conversationRepo.getPinnedConversations()
-
-    fun restoreConversation(conversation: Conversation) {
-        viewModelScope.launch {
-            conversationRepo.insertConversation(conversation)
-        }
-    }
-
-    suspend fun getFullConversation(conversationId: Uuid): Conversation? {
-        return conversationRepo.getConversationById(conversationId)
-    }
 }

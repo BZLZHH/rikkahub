@@ -12,6 +12,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.agent.AgentExecutionSnapshot
 import me.rerere.rikkahub.data.db.dao.WorkflowRunDAO
 import me.rerere.rikkahub.data.db.entity.WorkflowRunEntity
 import me.rerere.rikkahub.data.run.RunStatus
@@ -41,6 +42,7 @@ data class WorkflowToolContext(
     val dao: WorkflowRunDAO,
     val runner: WorkflowRunner,
     val scripts: WorkflowScriptStore,
+    val executionSnapshot: AgentExecutionSnapshot? = null,
 )
 
 private const val DEFAULT_MAX_STEPS = 20
@@ -141,11 +143,12 @@ private suspend fun executeRun(
             defaultModelId = ctx.defaultModelId,
             conversationId = ctx.conversationId,
             assistantId = ctx.assistantId,
+            executionSnapshot = ctx.executionSnapshot,
             source = script,
             name = name,
             saveAs = params.strJson("save_as")?.takeIf { it.isNotBlank() },
             args = args,
-            cwd = params.strJson("cwd")?.takeIf { it.isNotBlank() },
+            cwd = params.strJson("cwd")?.takeIf { it.isNotBlank() } ?: ctx.executionSnapshot?.workspaceCwd,
             maxSteps = maxSteps,
         )
     )

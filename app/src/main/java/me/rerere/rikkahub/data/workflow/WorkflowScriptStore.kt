@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.workflow
 
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceManager
+import me.rerere.workspace.JobParamResolver.shellQuote
 import java.io.ByteArrayOutputStream
 
 /**
@@ -20,13 +21,12 @@ class WorkflowScriptStore(
 
     /** 保存（覆盖）并返回落盘路径。 */
     suspend fun save(workspaceId: String, name: String, source: String): String {
-        val path = pathOf(name)
-        // 路径直接拼进 shell 命令 —— 这是安全的, 因为 requireValidName 是**白名单**式的:
-        // 只允许 [A-Za-z0-9._-] 且不以点开头, 里面不可能出现 shell 元字符（引号/分号/空格/$ 都没有）。
-        // 刻意不引入 shellQuote: 那种转义函数一旦写错就是命令注入, 而"名字根本不含特殊字符"是更强的保证。
+        val path = pathFor(workspaceId, name)
+        // Names are restricted; the configured SSH workspace root can still contain
+        // spaces or quotes, so quote every complete path before passing it to the shell.
         val result = workspaceRepository.executeCommand(
             id = workspaceId,
-            command = "mkdir -p -- " + DIR + " && cat > " + path,
+            command = "mkdir -p -- " + shellQuote(directoryFor(workspaceId)) + " && cat > " + shellQuote(path),
             timeoutMillis = WorkspaceManager.DEFAULT_COMMAND_TIMEOUT_MS,
             stdin = source.toByteArray(Charsets.UTF_8),
         )
@@ -39,12 +39,12 @@ class WorkflowScriptStore(
 
     /** 读回脚本; 不存在返回 null（调用方据此报"没有这个 workflow"）。 */
     suspend fun load(workspaceId: String, name: String): String? {
-        val path = pathOf(name)
-        val size = runCatching { workspaceRepository.rootfsFileSize(workspaceId, path) }.getOrNull()
+        val path = pathFor(workspaceId, name)
+        val size = runCatching { workspaceRepository.absoluteFileSize(workspaceId, path) }.getOrNull()
             ?: return null
         if (size <= 0L) return null
         val out = ByteArrayOutputStream(size.toInt())
-        runCatching { workspaceRepository.exportRootfsFile(workspaceId, path, out) }.getOrNull()
+        runCatching { workspaceRepository.exportAbsoluteFile(workspaceId, path, out) }.getOrNull()
             ?: return null
         return out.toString(Charsets.UTF_8.name())
     }
@@ -54,7 +54,7 @@ class WorkflowScriptStore(
         val result = runCatching {
             workspaceRepository.executeCommand(
                 id = workspaceId,
-                command = "ls -1 -- " + DIR + " 2>/dev/null || true",
+                command = "ls -1 -- " + shellQuote(directoryFor(workspaceId)) + " 2>/dev/null || true",
                 timeoutMillis = WorkspaceManager.DEFAULT_COMMAND_TIMEOUT_MS,
             )
         }.getOrNull() ?: return emptyList()
@@ -68,15 +68,23 @@ class WorkflowScriptStore(
     }
 
     suspend fun delete(workspaceId: String, name: String) {
-        val path = pathOf(name)
+        val path = pathFor(workspaceId, name)
         runCatching {
             workspaceRepository.executeCommand(
                 id = workspaceId,
-                command = "rm -f -- " + path,
+                command = "rm -f -- " + shellQuote(path),
                 timeoutMillis = WorkspaceManager.DEFAULT_COMMAND_TIMEOUT_MS,
             )
         }
     }
+
+    private suspend fun directoryFor(workspaceId: String): String {
+        val layout = workspaceRepository.layout(workspaceId) ?: error("Workspace layout unavailable: $workspaceId")
+        return layout.workspaceDir.trimEnd('/') + "/.rhe/workflows"
+    }
+
+    private suspend fun pathFor(workspaceId: String, name: String): String =
+        directoryFor(workspaceId) + "/" + requireValidName(name) + EXTENSION
 
     companion object {
         /** 工作区文件区里的约定目录。放在这里是为了让用户能一眼找到自己的脚本。 */

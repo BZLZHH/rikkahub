@@ -24,6 +24,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.BACKGROUND_KEEP_ALIVE_NOTIFICATION_CHANNEL_ID
@@ -194,7 +195,7 @@ class BackgroundKeepAliveService : Service() {
     private fun observeSettings() {
         if (settingsObserverJob != null) return
         settingsObserverJob = serviceScope.launch {
-            settingsStore.settingsFlowRaw.collect { settings ->
+            settingsStore.settingsFlow.filter { !it.init }.collect { settings ->
                 if (!settings.backgroundRunningEnabled) {
                     Log.i(TAG, "Background running disabled in settings, stopping service")
                     stopKeepAlive()

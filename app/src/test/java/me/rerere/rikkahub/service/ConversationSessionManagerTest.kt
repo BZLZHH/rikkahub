@@ -28,6 +28,7 @@ class ConversationSessionManagerTest {
         val completions = mutableListOf<ConversationSession>()
         val manager = ConversationSessionManager(
             scope = scope,
+            store = FakeConversationStore(),
             createInitialConversation = { Conversation.ofId(it) },
             onGenerationFinished = { session, _ -> completions.add(session) },
         )
@@ -45,7 +46,8 @@ class ConversationSessionManagerTest {
             val id = Uuid.random()
             val first = rig.manager.getOrCreate(id)
             val other = rig.manager.getOrCreate(Uuid.random())
-            first.updateConversation(first.state.value.copy(title = "first"))
+            runBlocking { first.initialize(load = { Conversation.ofId(id) }) }
+            first.update { it.copy(title = "first") }
             assertSame(first, rig.manager.getOrCreate(id))
             assertNotSame(first, other)
             assertEquals("", other.state.value.title)
@@ -104,9 +106,9 @@ class ConversationSessionManagerTest {
             session.setJob(job)
             rig.manager.removeIfIdle(session)
             assertSame(session, rig.manager.get(session.id))
-            session.messageQueue.enqueue(listOf(UIMessagePart.Text("next")))
+            session.inbox.enqueue(listOf(UIMessagePart.Text("next")))
             job.cancel()
-            session.messageQueue.pause()
+            session.inbox.pause()
             rig.manager.removeIfIdle(session)
             assertSame(session, rig.manager.get(session.id))
             assertEquals(listOf(session), rig.completions)

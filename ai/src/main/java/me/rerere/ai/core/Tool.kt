@@ -14,6 +14,8 @@ data class Tool(
     val description: String,
     val parameters: () -> InputSchema? = { null },
     val systemPrompt: (model: Model, messages: List<UIMessage>) -> String = { _, _ -> "" },
+    /** SDK fallback for Auto calls; application permission decisions take precedence. */
+    val needsApproval: (JsonElement) -> Boolean = { false },
     val execute: suspend (JsonElement) -> List<UIMessagePart>
 )
 

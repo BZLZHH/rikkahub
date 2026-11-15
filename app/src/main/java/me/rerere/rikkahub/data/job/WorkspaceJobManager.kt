@@ -143,7 +143,7 @@ class WorkspaceJobManager(
 
     /** 常驻开启后补跑被系统拦下的定时任务。 */
     suspend fun runDeferredJobs(): Int {
-        val enabled = runCatching { settingsStore.settingsFlowRaw.first().backgroundRunningEnabled }
+        val enabled = runCatching { settingsStore.awaitLoaded().backgroundRunningEnabled }
             .getOrDefault(false)
         if (!enabled) return 0
         val deferred = dao.listDeferredJobs()
@@ -225,7 +225,7 @@ class WorkspaceJobManager(
 
         if (triggerSource == JobTriggerSource.SCHEDULE && requireKeepAlive) {
             val keepAliveEnabled = runCatching {
-                settingsStore.settingsFlowRaw.first().backgroundRunningEnabled
+                settingsStore.awaitLoaded().backgroundRunningEnabled
             }.getOrDefault(false)
             if (!keepAliveEnabled) {
                 // 后台起前台服务在 Android 12+ 可能被系统拒绝, 与其跑一半被杀, 不如标记延后
@@ -402,6 +402,7 @@ class WorkspaceJobManager(
         command: String,
         env: Map<String, String>,
     ): WorkspaceJobEntity {
+        require(workspace.capabilities().rootfs) { "Local Rootfs jobs are not supported by this workspace" }
         val startedAt = System.currentTimeMillis()
         val generation = processGeneration.incrementAndGet()
         val started = job.copy(
@@ -494,6 +495,7 @@ class WorkspaceJobManager(
         val session = try {
             PtyJobSession.create(
                 context = context,
+                workspaceManager = workspaceManager,
                 workspaceRoot = workspace.root,
                 jobId = job.id,
                 command = command,
@@ -640,7 +642,7 @@ class WorkspaceJobManager(
 
     private fun ensureKeepAlive() {
         appScope.launch {
-            val enabled = runCatching { settingsStore.settingsFlowRaw.first().backgroundRunningEnabled }
+            val enabled = runCatching { settingsStore.awaitLoaded().backgroundRunningEnabled }
                 .getOrDefault(false)
             if (enabled) BackgroundKeepAliveService.start(context)
         }

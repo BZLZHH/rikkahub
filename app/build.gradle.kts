@@ -28,14 +28,14 @@ android {
         minSdk = 26
         targetSdk = 37
         // 版本号体系: 保留上游基线 + RHE 独立版本
-        //   versionCode = 上游 versionCode * 1000 + RHE build  (189 * 1000 + 1 = 189001, 单调递增)
-        //   versionName = <上游版本>-rhe.<RHE 版本>             (2.5.4-rhe.1.0, 语义化可比较)
-        versionCode = 189001
-        versionName = "2.5.4-rhe.1.0"
+        //   versionCode = 上游 versionCode * 1000 + RHE build  (196 * 1000 + 1 = 196001, 单调递增)
+        //   versionName = <上游版本>-rhe.<RHE 版本>             (3.2.0-rhe.1.0, 语义化可比较)
+        versionCode = 196001
+        versionName = "3.2.0-rhe.1.0"
 
         // 供 About 页同时展示两套版本号
-        buildConfigField("String", "UPSTREAM_VERSION_NAME", "\"2.5.4\"")
-        buildConfigField("String", "UPSTREAM_VERSION_CODE", "\"189\"")
+        buildConfigField("String", "UPSTREAM_VERSION_NAME", "\"3.2.0\"")
+        buildConfigField("String", "UPSTREAM_VERSION_CODE", "\"196\"")
         buildConfigField("String", "RHE_VERSION_NAME", "\"1.0\"")
         buildConfigField("String", "RHE_VERSION_CODE", "\"1\"")
 
@@ -98,6 +98,20 @@ android {
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }
     }
+    // 按分发渠道区分：github 是 GitHub Release / 每日构建的 APK，play 是上架 Google Play 的 AAB
+    // 两个渠道共用同一个 applicationId，Play 版不能自更新，相关入口通过 BuildConfig.IS_PLAY_STORE 关闭
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("github") {
+            dimension = "distribution"
+            isDefault = true
+            buildConfigField("boolean", "IS_PLAY_STORE", "false")
+        }
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("boolean", "IS_PLAY_STORE", "true")
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -111,11 +125,16 @@ android {
     }
     androidResources {
         generateLocaleConfig = true
+        // 只保留 app 自己翻译过的语言，依赖库（AndroidX、GMS 等）带的其他语言资源不打包
+        localeFilters += listOf("en", "ar", "de", "ja", "ko", "ko-rKR", "ru", "zh", "zh-rTW")
     }
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            pickFirsts += "lib/*/libtermux.so"
+        }
+        resources {
+            // BouncyCastle 的 Picnic 后量子签名查找表（约 1.2MB），JSch 用不到
+            excludes += "org/bouncycastle/pqc/crypto/picnic/**"
         }
     }
     tasks.withType<KotlinCompile>().configureEach {
@@ -133,6 +152,19 @@ android {
     }
 }
 
+// 两个渠道的启动路径一样，profile 合并到 src/main 共用，不按变体各存一份
+baselineProfile {
+    mergeIntoMain = true
+}
+
+// baselineprofile 插件按 release 复制出 nonMinifiedRelease 时只关掉 isMinifyEnabled，关不掉 optimization，
+// 不手动关的话生成用的包会被 R8 内联、合并类，profile 里记下的是优化后的类和方法
+androidComponents {
+    finalizeDsl { extension ->
+        extension.buildTypes.findByName("nonMinifiedRelease")?.optimization?.enable = false
+    }
+}
+
 composeCompiler {
     stabilityConfigurationFiles.add(
         project.layout.projectDirectory.file("compose_compiler_config.conf")
@@ -140,8 +172,8 @@ composeCompiler {
 }
 
 tasks.register("buildAll") {
-    dependsOn("assembleRelease", "bundleRelease")
-    description = "Build both APK and AAB"
+    dependsOn("assembleGithubRelease", "bundlePlayRelease")
+    description = "Build GitHub APK and Play AAB"
 }
 
 ksp {
@@ -154,8 +186,16 @@ kotlin {
     }
 }
 
+// kotlin-reflect 只由 ktor-server-core 传递引入，用到它的只有按配置加载模块、开发模式热重载等用不到的路径。
+// 它在 classpath 上时 stdlib 的 Reflection 会 Class.forName 加载 ReflectionFactoryImpl，R8 因此保留整个实现（约 0.7MB dex）
+configurations.matching { it.name.endsWith("RuntimeClasspath") }.configureEach {
+    exclude(group = "org.jetbrains.kotlin", module = "kotlin-reflect")
+}
+
 // Local JVM tests need the desktop native library instead of the Android AAR.
 configurations.matching { it.name.endsWith("UnitTestRuntimeClasspath") }.configureEach {
+    // JVM tests have no Android Log implementation; use SLF4J's no-provider fallback.
+    exclude(group = "uk.uuid.slf4j", module = "slf4j-android")
     resolutionStrategy.dependencySubstitution {
         substitute(module("io.github.dokar3:quickjs-kt-android"))
             .using(module("io.github.dokar3:quickjs-kt-jvm:${libs.versions.quickjs.get()}"))
@@ -170,7 +210,10 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.profileinstaller)
-    implementation(libs.termux.terminal.view)
+    implementation(libs.termux.terminal.view) {
+        // terminal-emulator 由仓库内的 :terminal 模块提供, 不再引入上游 aar
+        exclude(group = "com.termux.termux-app", module = "terminal-emulator")
+    }
     implementation(libs.guava.listenablefuture)
 
     // Compose
@@ -197,6 +240,9 @@ dependencies {
     // DataStore
     implementation(libs.androidx.datastore.preferences)
 
+    // EXIF orientation for picked images
+    implementation(libs.androidx.exifinterface)
+
     // Image metadata extractor
     // https://github.com/drewnoakes/metadata-extractor
     implementation(libs.metadata.extractor)
@@ -214,9 +260,6 @@ dependencies {
     implementation(libs.koin.compose)
     implementation(libs.koin.androidx.workmanager)
 
-    // jetbrains markdown parser
-    implementation(libs.jetbrains.markdown)
-
     // okhttp
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)
@@ -228,9 +271,6 @@ dependencies {
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
-
-    // ucrop
-    implementation(libs.ucrop)
 
     // pebble (template engine)
     implementation(libs.pebble)
@@ -251,13 +291,11 @@ dependencies {
     // YAML front matter
     implementation(libs.snakeyaml)
 
-    // zxing
+    // zxing + CameraX (qrcode scanner)
     implementation(libs.zxing.core)
-
-    // quickie (qrcode scanner)
-    implementation(libs.quickie.bundled)
-    implementation(libs.barcode.scanning)
-    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.compose)
 
     // Room
     implementation(libs.androidx.room.runtime)
@@ -270,27 +308,29 @@ dependencies {
     implementation(libs.androidx.paging.runtime)
     implementation(libs.androidx.paging.compose)
 
+    // media3 (video playback)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
+
     // Apache Commons Text
     implementation(libs.commons.text)
-
-    // Toast (Sonner)
-    implementation(libs.sonner)
 
     // Reorderable (https://github.com/Calvin-LL/Reorderable/)
     implementation(libs.reorderable)
 
-    // lucide icons
-    implementation(libs.lucide.icons)
+    // icons
     implementation(libs.huge.icons)
 
     // image viewer
     implementation(libs.image.viewer)
 
     // JLatexMath
-    // https://github.com/rikkahub/jlatexmath-android
-    implementation(libs.jlatexmath)
-    implementation(libs.jlatexmath.font.greek)
-    implementation(libs.jlatexmath.font.cyrillic)
+    // https://github.com/re-ovo/bettertext
+    implementation(platform(libs.bettertext.bom))
+    implementation(libs.bettertext.text)
+    implementation(libs.bettertext.markdown)
+    implementation(libs.bettertext.latex)
+    implementation(libs.bettertext.highlight)
 
     // mcp
     implementation(libs.modelcontextprotocol.kotlin.sdk)
@@ -309,22 +349,23 @@ dependencies {
     implementation(project(":ai"))
     implementation(project(":web"))
     implementation(project(":document"))
-    implementation(project(":highlight"))
     implementation(project(":search"))
     implementation(project(":speech"))
-    implementation(project(":videogen"))
+    implementation(project(":mediagen"))
     implementation(project(":common"))
     implementation(project(":material3"))
+    implementation(project(":ui"))
     implementation(project(":workspace"))
+    implementation(project(":terminal"))
     implementation(project(":oauth"))
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
-    implementation(kotlin("reflect"))
 
     // Leak Canary
     // debugImplementation(libs.leakcanary.android)
 
     // tests
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

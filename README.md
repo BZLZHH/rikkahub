@@ -15,8 +15,8 @@ It ships under its own application ID and version line, so it can be installed a
 | | |
 |---|---|
 | Application ID | `me.rerere.rikkahub.enhanced` |
-| Current version | `2.5.4-rhe.1.0` (versionCode `189001`) |
-| Upstream baseline | RikkaHub `2.5.4` (versionCode `189`) |
+| Current version | `3.2.0-rhe.1.0` (versionCode `196001`) |
+| Upstream baseline | RikkaHub `3.2.0` (versionCode `196`) |
 | License | AGPL-3.0 |
 
 ## What this fork adds
@@ -30,8 +30,8 @@ manage them afterwards: start, list, status, incremental log reading, wait, stop
 reusable job definitions with parameters, scheduling (delay / interval / cron), an interactive pty mode,
 completion notifications, and optional wake-up of the conversation when a job finishes.
 
-**Tool-call auto-approval.** Approvals required by high-impact tools can be delegated to a model of your choice;
-anything uncertain still asks you.
+**Tool permissions.** A shared permission kernel applies the selected permission mode and saved rules to chat,
+subagent and workflow tool calls.
 
 **Upstream fix.** A navigation crash (`NavDisplay backstack cannot be empty`) present upstream is fixed.
 
@@ -40,7 +40,7 @@ anything uncertain still asks you.
 Prebuilt APKs are attached to [Releases](https://github.com/BZLZHH/rikkahub/releases) when published.
 
 ```bash
-adb install -r app-universal-release.apk
+adb install -r app-github-universal-release.apk
 ```
 
 The application ID differs from the official app, so both can be installed at the same time.
@@ -51,7 +51,7 @@ In-place upgrades require the same signing key.
 Requirements: JDK 21, Android SDK (compileSdk 37).
 
 ```bash
-./gradlew :app:assembleRelease
+./gradlew :app:assembleGithubRelease
 ```
 
 `app/google-services.json` is not part of this repository; supply your own Firebase configuration before

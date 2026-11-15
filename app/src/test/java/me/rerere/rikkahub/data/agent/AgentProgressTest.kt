@@ -38,6 +38,17 @@ class AgentProgressTest {
     )
 
     @Test
+    fun upstreamSingleMessageCountsEveryModelStep() {
+        val response = assistant(usage = TokenUsage(promptTokens = 900, completionTokens = 80), toolCount = 4)
+            .copy(stepCount = 5)
+        val snapshot = snapshotOf(listOf(UIMessage.user("任务"), response))
+        assertEquals(5, snapshot.steps)
+        assertEquals(4, snapshot.toolCalls)
+        assertEquals(900, snapshot.tokensIn)
+        assertEquals(80, snapshot.tokensOut)
+    }
+
+    @Test
     fun emptyConversationIsAllZero() {
         assertEquals(AgentProgressSnapshot(0, 0, 0, 0), snapshotOf(emptyList()))
     }

@@ -70,6 +70,15 @@ class AgentToolPolicyTest {
     }
 
     @Test
+    fun upstreamShellControlsAndMemoryFilesKeepTheirGroups() {
+        listOf("workspace_shell_output", "workspace_shell_kill").forEach {
+            assertEquals(AgentToolGroup.WORKSPACE, AgentToolPolicy.groupOf(it))
+        }
+        listOf("memory_read", "memory_write", "memory_str_replace", "memory_append", "memory_delete", "memory_list")
+            .forEach { assertEquals(AgentToolGroup.MEMORY, AgentToolPolicy.groupOf(it)) }
+    }
+
+    @Test
     fun groupParsingIgnoresUnknownNames() {
         val parsed = AgentToolGroup.parseAll(listOf("workspace", "WEB", "nope", "  local  "))
         assertEquals(

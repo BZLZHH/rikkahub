@@ -338,6 +338,12 @@ private fun PartBlock(part: UIMessagePart) {
             )
         }
 
+        is UIMessagePart.Notice -> CollapsibleBlock(
+            header = part.title,
+            body = part.text,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
         is UIMessagePart.Tool -> ToolBlock(part)
 
         is UIMessagePart.Image -> CollapsibleBlock(

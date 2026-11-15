@@ -14,11 +14,14 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.model.Conversation
 import kotlin.uuid.Uuid
 
-/** Owns runtime sessions; loading, persistence and message dispatch belong to ChatService. */
+/** Owns runtime sessions; loading and message dispatch belong to ChatService, persistence goes through [ConversationStore]. */
 class ConversationSessionManager(
     private val scope: CoroutineScope,
+    private val store: ConversationStore,
     private val createInitialConversation: (Uuid) -> Conversation,
     private val onGenerationFinished: (ConversationSession, Throwable?) -> Unit,
+    // 会话没有页面引用也不在生成，被回收了
+    private val onSessionRemoved: (Uuid) -> Unit = {},
 ) {
     private val lock = Any()
     private val sessions = MutableStateFlow<Map<Uuid, ConversationSession>>(emptyMap())
@@ -34,6 +37,7 @@ class ConversationSessionManager(
             id = conversationId,
             initial = createInitialConversation(conversationId),
             scope = scope,
+            store = store,
             onIdle = { removeIfIdle(session) },
             onGenerationFinished = { id, cause ->
                 if (get(id) === session) onGenerationFinished(session, cause)
@@ -77,6 +81,7 @@ class ConversationSessionManager(
         }
         // Job completion can call back into the registry; never hold its lock during cleanup.
         removed.cleanup()
+        onSessionRemoved(removed.id)
     }
 
     fun cleanup() {
@@ -92,12 +97,23 @@ class ConversationSessionManager(
     fun getProcessingStatusFlow(conversationId: Uuid): StateFlow<String?> =
         getOrCreate(conversationId).processingStatus
 
-    fun getMessageQueueFlow(conversationId: Uuid): StateFlow<MessageQueueState> =
-        getOrCreate(conversationId).messageQueue.state
+    fun getReplyMessageIdFlow(conversationId: Uuid): StateFlow<Uuid?> =
+        getOrCreate(conversationId).replyMessageId
+
+    fun getGenerationStartedAtFlow(conversationId: Uuid): StateFlow<Long?> =
+        getOrCreate(conversationId).generationStartedAt
+
+    fun getInboxFlow(conversationId: Uuid): StateFlow<InboxState> =
+        getOrCreate(conversationId).inbox.state
 
     fun getGenerationJobStateFlow(conversationId: Uuid): Flow<Job?> =
         sessions.map { it[conversationId] }.distinctUntilChanged().flatMapLatest { session ->
             session?.generationJob ?: flowOf(null)
+        }
+
+    fun getActivityFlow(conversationId: Uuid): Flow<SessionActivity?> =
+        sessions.map { it[conversationId] }.distinctUntilChanged().flatMapLatest { session ->
+            session?.activity ?: flowOf(null)
         }
 
     fun getConversationJobs(): Flow<Map<Uuid, Job?>> = sessions.flatMapLatest { current ->

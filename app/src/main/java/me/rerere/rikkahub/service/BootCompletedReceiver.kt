@@ -11,7 +11,6 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import org.koin.core.context.GlobalContext
@@ -40,7 +39,7 @@ class BootCompletedReceiver : BroadcastReceiver() {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 val koin = runCatching { GlobalContext.get() }.getOrNull() ?: return@launch
-                val settings = koin.get<SettingsStore>().settingsFlowRaw.first()
+                val settings = koin.get<SettingsStore>().awaitLoaded()
                 if (!settings.backgroundRunningEnabled) {
                     Log.i(TAG, "Background running is disabled, skip auto start")
                     return@launch

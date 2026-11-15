@@ -54,8 +54,8 @@ fun SettingBackgroundExecutionPage() {
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
-    fun apply(updated: Settings) {
-        scope.launch { settingsStore.update(updated) }
+    fun apply(update: (Settings) -> Settings) {
+        scope.launch { settingsStore.update(update) }
     }
 
     // CardGroup 的 content lambda 不是 @Composable, 所以文案必须在这里先取好再传进去。
@@ -99,14 +99,14 @@ fun SettingBackgroundExecutionPage() {
                         supporting = jobsGlobalDesc,
                         value = settings.maxConcurrentJobs,
                         max = RunQuota.MAX_CONCURRENT_LIMIT,
-                        onChange = { apply(settings.copy(maxConcurrentJobs = it)) },
+                        onChange = { value -> apply { it.copy(maxConcurrentJobs = value) } },
                     )
                     stepper(
                         headline = jobsWorkspace,
                         supporting = jobsWorkspaceDesc,
                         value = settings.maxConcurrentJobsPerWorkspace,
                         max = RunQuota.MAX_CONCURRENT_PER_WORKSPACE_LIMIT,
-                        onChange = { apply(settings.copy(maxConcurrentJobsPerWorkspace = it)) },
+                        onChange = { value -> apply { it.copy(maxConcurrentJobsPerWorkspace = value) } },
                     )
                 }
             }
@@ -121,14 +121,14 @@ fun SettingBackgroundExecutionPage() {
                         supporting = agentsGlobalDesc,
                         value = settings.maxConcurrentAgents,
                         max = RunQuota.MAX_CONCURRENT_LIMIT,
-                        onChange = { apply(settings.copy(maxConcurrentAgents = it)) },
+                        onChange = { value -> apply { it.copy(maxConcurrentAgents = value) } },
                     )
                     stepper(
                         headline = agentsWorkspace,
                         supporting = agentsWorkspaceDesc,
                         value = settings.maxConcurrentAgentsPerWorkspace,
                         max = RunQuota.MAX_CONCURRENT_PER_WORKSPACE_LIMIT,
-                        onChange = { apply(settings.copy(maxConcurrentAgentsPerWorkspace = it)) },
+                        onChange = { value -> apply { it.copy(maxConcurrentAgentsPerWorkspace = value) } },
                     )
                 }
             }

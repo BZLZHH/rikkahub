@@ -6,7 +6,9 @@ import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import me.rerere.rikkahub.ui.pages.extensions.workspace.createWorkspaceTerminalSession
-import me.rerere.rikkahub.ui.pages.extensions.workspace.prepareWorkspaceTerminalSession
+import me.rerere.rikkahub.ui.pages.extensions.workspace.activeDnsServers
+import me.rerere.rikkahub.ui.pages.extensions.workspace.toTransport
+import me.rerere.workspace.WorkspaceManager
 
 /**
  * 交互式（pty）后台任务。
@@ -38,9 +40,6 @@ class PtyJobSession internal constructor(
 
     val exitStatus: Int
         get() = runCatching { session.exitStatus }.getOrDefault(-1)
-
-    val pid: Int
-        get() = runCatching { session.pid }.getOrDefault(-1)
 
     /** 由管理器按固定间隔调用: 记录屏幕变化并检测退出。 */
     fun poll() {
@@ -100,6 +99,7 @@ class PtyJobSession internal constructor(
 
         fun create(
             context: Context,
+            workspaceManager: WorkspaceManager,
             workspaceRoot: String,
             jobId: String,
             command: String,
@@ -111,15 +111,18 @@ class PtyJobSession internal constructor(
             rows: Int = DEFAULT_ROWS,
             onFinished: () -> Unit = {},
         ): PtyJobSession {
-            prepareWorkspaceTerminalSession(context, workspaceRoot)
-            val session = createWorkspaceTerminalSession(
-                context = context,
+            workspaceManager.prepareTerminal(workspaceRoot, context.activeDnsServers())
+            val launch = requireNotNull(workspaceManager.terminalLaunch(
                 root = workspaceRoot,
-                client = HeadlessTerminalClient(),
                 shellCompatibilityMode = shellCompatibilityMode,
                 command = command,
                 cwd = cwd,
                 extraEnv = env,
+            )) { "PTY jobs are not supported by this workspace shell" }
+            val session = createWorkspaceTerminalSession(
+                transport = launch.toTransport(),
+                root = workspaceRoot,
+                client = HeadlessTerminalClient(),
             )
             session.initializeEmulator(cols, rows)
             val screenFile = logStore.streamFile(workspaceRoot, jobId, JobLogStream.SCREEN)

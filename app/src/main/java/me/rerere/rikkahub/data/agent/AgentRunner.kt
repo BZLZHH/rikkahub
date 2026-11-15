@@ -1,6 +1,9 @@
 package me.rerere.rikkahub.data.agent
 
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.JsonObject
@@ -10,8 +13,13 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.ai.GenerationChunk
-import me.rerere.rikkahub.data.ai.GenerationLoop
+import me.rerere.ai.agent.AgentEvent as LoopEvent
+import me.rerere.ai.agent.AgentFinishReason
+import me.rerere.ai.agent.runAgent
+import me.rerere.rikkahub.data.ai.ChatRequestFactory
+import me.rerere.rikkahub.data.ai.ChatTurnContext
+import me.rerere.rikkahub.data.datastore.findProvider
+import kotlin.uuid.Uuid
 import me.rerere.rikkahub.data.permission.PermissionContext
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
@@ -48,17 +56,18 @@ sealed interface AgentEvent {
 }
 
 /**
- * 子代理的执行体: 用 [GenerationLoop] 跑一个**独立的上下文窗口**。
+ * 子代理的执行体: 用上游 [runAgent] 跑一个**独立的上下文窗口**。
  *
  * 与主会话的区别只有三处, 其余全部复用:
  * 1. 上下文从零开始 —— 只带系统指令 + 任务, 不带父会话历史(这正是"子代理"的意义);
  * 2. 工具集受限（见 [AgentToolPolicy]）;
  * 3. 有明确的预算闸（maxSteps）。
  *
- * 刻意不改 [GenerationLoop]: 那是主会话跑得好好的路径, 动它的风险远大于收益。
+ * 与主会话共用 ChatRequestFactory 的转换器与权限裁决，不再维护第二套生成引擎。
  */
 class AgentRunner(
-    private val generationLoop: GenerationLoop,
+    // Lazy to avoid ChatToolFactory -> WorkflowRunner -> AgentRunner -> ChatRequestFactory.
+    private val requestFactory: () -> ChatRequestFactory,
     private val transcripts: AgentTranscriptStore,
 ) {
     fun run(
@@ -72,6 +81,7 @@ class AgentRunner(
         cwd: String?,
         maxSteps: Int,
     ): Flow<AgentEvent> = flow {
+        require(maxSteps > 0) { "maxSteps must be positive" }
         val assistant = parentAssistant.copy(
             systemPrompt = instructions,
             // 不复用记忆与历史会话: 会把父会话上下文泄漏进子代理
@@ -79,6 +89,12 @@ class AgentRunner(
             enableRecentChatsReference = false,
             enabledSkills = emptySet(),
             allowConversationSystemPrompt = false,
+            // Shared input transformers must not inject the parent's private prompts.
+            modeInjectionIds = emptySet(),
+            lorebookIds = emptySet(),
+            messageTemplate = "{{ message }}",
+            regexes = emptyList(),
+            enableTimeReminder = false,
         )
 
         writeTranscript(runId, "start", buildJsonObject {
@@ -92,58 +108,68 @@ class AgentRunner(
         var toolCalls = 0
         var promptTokens = 0
         var completionTokens = 0
-        var lastMessages: List<UIMessage> = emptyList()
+        val history = listOf(UIMessage.user(prompt))
+        var lastMessages: List<UIMessage> = history
         // 完整对话的增量落盘。**不能按条数做游标** —— 流式期间最后一条会原地变长,
         // 条数不变, 那样写下去的是"空壳"版本, 真正的结论永远落盘不了。详见 ConversationWriter。
         val conversation = ConversationWriter(transcripts, runId)
-        // 预算闸: GenerationLoop 的 maxSteps 只约束**单次生成**内的循环步数,
-        // 约束不了"整段运行"的总轮次。总预算必须在这里自己盯 —— 否则一个不停调用工具的
-        // 子代理会无限跑下去, 烧光 token 也占着并发配额。
-        val budget = AgentBudget(maxRounds = maxSteps)
-
+        val turn = ChatTurnContext(
+            settings = settings,
+            assistant = assistant,
+            model = model,
+            providerSetting = model.findProvider(settings.providers) ?: error("Provider not found"),
+            // Cache/session isolation: never borrow the parent conversation id.
+            conversationId = Uuid.parse(runId),
+            conversationSystemPrompt = null,
+            workspaceCwd = cwd,
+            memories = emptyList(),
+            tools = tools,
+        )
+        val (request, hooks) = requestFactory().createAgent(
+            turn = turn,
+            messages = history,
+            processingStatus = MutableStateFlow(null),
+            permission = PermissionContext.background(),
+        )
         try {
-            generationLoop.generateText(
-                settings = settings,
-                model = model,
-                messages = listOf(UIMessage.user(prompt)),
-                assistant = assistant,
-                tools = tools,
-                // 给 GenerationLoop 一个宽松的内部上限; **总预算由下面的预算闸盯**
-                maxSteps = maxSteps * 2,
-                workspaceCwd = cwd,
-                // 后台执行体：信封内不询问（没人可问），信封外直接拒绝
-                permission = PermissionContext.background(),
-            ).collect { chunk ->
-                when (chunk) {
-                    is GenerationChunk.Messages -> {
-                        lastMessages = chunk.messages
-                        // 只写已经定稿的那些; 最后一条可能还在流式增长, 留到结束时再补。
-                        conversation.sync(lastMessages)
-                        steps = lastMessages.count { it.role == MessageRole.ASSISTANT }
-                        toolCalls = lastMessages.sumOf { it.getTools().size }
-                        lastMessages.asReversed().firstNotNullOfOrNull { it.usage }?.let { usage ->
-                            promptTokens = usage.promptTokens
-                            completionTokens = usage.completionTokens
-                        }
-                        writeTranscript(runId, "step", buildJsonObject {
-                            put("steps", steps)
-                            put("toolCalls", toolCalls)
-                            put("promptTokens", promptTokens)
-                            put("completionTokens", completionTokens)
-                            put("tail", lastMessages.lastOrNull()?.toText()?.take(2_000) ?: "")
-                        })
-                        emit(AgentEvent.Messages(lastMessages))
-                        val lastAssistant = lastMessages.lastOrNull { it.role == MessageRole.ASSISTANT }
-                        val exceeded = budget.onAssistantMessage(
-                            lastAssistant?.let { it.getTools().isNotEmpty() },
-                        )
-                        if (exceeded) {
+            runAgent(request.copy(maxSteps = maxSteps), hooks).collect { event ->
+                val message = when (event) {
+                    is LoopEvent.MessageUpdated -> event.message
+                    is LoopEvent.Finished -> event.message
+                    is LoopEvent.Retrying -> {
+                        Log.w(TAG, "agent provider retry: " + event.attempt.cause)
+                        return@collect
+                    }
+                }
+                lastMessages = history + message
+                conversation.sync(lastMessages)
+                val snapshot = snapshotOf(lastMessages)
+                steps = snapshot.steps
+                toolCalls = snapshot.toolCalls
+                promptTokens = snapshot.tokensIn
+                completionTokens = snapshot.tokensOut
+                writeTranscript(runId, "step", buildJsonObject {
+                    put("steps", steps)
+                    put("toolCalls", toolCalls)
+                    put("promptTokens", promptTokens)
+                    put("completionTokens", completionTokens)
+                    put("tail", message.toText().take(2_000))
+                })
+                emit(AgentEvent.Messages(lastMessages))
+                if (event is LoopEvent.Finished) {
+                    emit(AgentEvent.Progress(steps, toolCalls, promptTokens, completionTokens))
+                    when (event.reason) {
+                        AgentFinishReason.StepLimitReached -> {
                             writeTranscript(runId, "budget", buildJsonObject {
-                                put("rounds", budget.rounds)
+                                put("rounds", steps)
                                 put("maxSteps", maxSteps)
                             })
-                            throw AgentBudgetExceededException(budget.rounds, maxSteps)
+                            throw AgentBudgetExceededException(steps, maxSteps)
                         }
+                        is AgentFinishReason.AwaitingApproval ->
+                            error("Background agent cannot wait for interactive approval")
+                        AgentFinishReason.Paused -> error("Background agent unexpectedly paused")
+                        AgentFinishReason.Completed -> Unit
                     }
                 }
             }
@@ -167,7 +193,7 @@ class AgentRunner(
             ?.toText()
             .orEmpty()
         emit(AgentEvent.Finished(text))
-    }
+    }.flowOn(Dispatchers.IO)
 
     private fun writeTranscript(runId: String, type: String, payload: JsonObject) {
         runCatching {

@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
+import me.rerere.rikkahub.data.agent.AgentExecutionSnapshot
 import me.rerere.rikkahub.data.agent.AgentToolGroup
 import me.rerere.rikkahub.data.agent.AgentTranscriptStore
 import me.rerere.rikkahub.data.db.dao.AgentRunDAO
@@ -32,6 +33,7 @@ data class SubagentToolContext(
     val dao: AgentRunDAO,
     val transcripts: AgentTranscriptStore,
     val orchestrator: RunOrchestrator,
+    val executionSnapshot: AgentExecutionSnapshot? = null,
 )
 
 private const val DEFAULT_MAX_STEPS = 20
@@ -124,7 +126,9 @@ private suspend fun executeStart(
 
     val runId = Uuid.random().toString()
     val args = buildJsonObject {
-        params.strJson("cwd")?.takeIf { it.isNotBlank() }?.let { put("cwd", it) }
+        (params.strJson("cwd")?.takeIf { it.isNotBlank() } ?: ctx.executionSnapshot?.workspaceCwd)
+            ?.let { put("cwd", it) }
+        ctx.executionSnapshot?.let { put(AgentExecutionSnapshot.ARG_KEY, it.toJson()) }
         put("max_steps", maxSteps)
         put("exclude_job_tools", excludeJobTools.toString())
     }

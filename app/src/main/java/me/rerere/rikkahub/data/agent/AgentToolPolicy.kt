@@ -57,6 +57,8 @@ object AgentToolPolicy {
         "workspace_write_file" to AgentToolGroup.WORKSPACE,
         "workspace_edit_file" to AgentToolGroup.WORKSPACE,
         "workspace_shell" to AgentToolGroup.WORKSPACE,
+        "workspace_shell_output" to AgentToolGroup.WORKSPACE,
+        "workspace_shell_kill" to AgentToolGroup.WORKSPACE,
         // 后台任务（job_* 全部按前缀归入 WORKSPACE）
         "job_start" to AgentToolGroup.WORKSPACE,
         "job_run" to AgentToolGroup.WORKSPACE,
@@ -86,6 +88,12 @@ object AgentToolPolicy {
         "calendar_query" to AgentToolGroup.LOCAL,
         // 记忆 / 会话 / 技能
         "memory_tool" to AgentToolGroup.MEMORY,
+        "memory_read" to AgentToolGroup.MEMORY,
+        "memory_write" to AgentToolGroup.MEMORY,
+        "memory_str_replace" to AgentToolGroup.MEMORY,
+        "memory_append" to AgentToolGroup.MEMORY,
+        "memory_delete" to AgentToolGroup.MEMORY,
+        "memory_list" to AgentToolGroup.MEMORY,
         "conversation_search" to AgentToolGroup.CONVERSATION,
         "recent_chats" to AgentToolGroup.CONVERSATION,
         "use_skill" to AgentToolGroup.SKILL,
