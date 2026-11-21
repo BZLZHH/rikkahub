@@ -58,6 +58,7 @@ class ProotCommandTest {
     fun ptyJobsUseConfiguredMountsCwdAndGuestEnvironment() {
         val native = tempFolder.newFolder("native")
         val upload = tempFolder.newFolder("upload")
+        val shared = tempFolder.newFolder("shared directory")
         val manager = WorkspaceManager(
             baseDir = tempFolder.newFolder("workspaces"),
             shellRunner = ProotShellRunner(native),
@@ -71,10 +72,12 @@ class ProotCommandTest {
             command = command,
             cwd = "nested folder",
             extraEnv = mapOf("JOB_VALUE" to "two words"),
+            extraMounts = listOf(WorkspaceBindMount(shared, "/storage/emulated/0/Documents")),
         )!!
 
         assertEquals(listOf("rikkahub", "/workspace/nested folder", command), launch.args.takeLast(3))
         assertTrue(upload.absolutePath + ":/upload" in launch.args)
+        assertTrue(shared.absolutePath + ":/storage/emulated/0/Documents" in launch.args)
         assertTrue(launch.args.indexOf("JOB_VALUE=two words") > launch.args.indexOf("-i"))
         assertTrue(launch.args.indexOf("JOB_VALUE=two words") < launch.args.indexOf("/bin/sh"))
         assertTrue("PROOT_NO_SECCOMP=1" in launch.env)

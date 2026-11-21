@@ -109,6 +109,7 @@ import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Wrench01
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.model.WorkspaceStorageMount
 import me.rerere.rikkahub.data.workspace.RootfsCatalog
 import androidx.compose.ui.res.stringResource
 import me.rerere.rikkahub.R
@@ -259,6 +260,7 @@ fun WorkspaceDetailPage(id: String) {
                         installProgress = installProgress,
                         onInstallRootfs = { showInstallDialog = true },
                         onShellCompatibilityModeChange = vm::setShellCompatibilityMode,
+                        onStorageMountsChange = vm::setStorageMounts,
                         onEditSsh = { navController.navigate(Screen.WorkspaceSshEditor(id)) },
                     )
 
@@ -419,6 +421,7 @@ private fun WorkspaceBasicPage(
     installProgress: RootfsInstallProgress?,
     onInstallRootfs: () -> Unit,
     onShellCompatibilityModeChange: (Boolean) -> Unit,
+    onStorageMountsChange: (List<WorkspaceStorageMount>) -> Unit,
     onEditSsh: () -> Unit,
 ) {
     val shellStatus = workspace?.shellStatus
@@ -499,6 +502,12 @@ private fun WorkspaceBasicPage(
                         headlineContent = { Text(stringResource(R.string.workspace_detail_compatibility_mode)) },
                     )
                 }
+            }
+            item {
+                WorkspaceStorageMountCard(
+                    workspace = workspace,
+                    onMountsChange = onStorageMountsChange,
+                )
             }
         }
 

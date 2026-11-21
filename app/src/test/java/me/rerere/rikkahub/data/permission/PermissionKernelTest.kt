@@ -167,6 +167,28 @@ class PermissionKernelTest {
     }
 
     @Test
+    fun nestedStorageMountRequiresApprovalDespiteWritableParent() {
+        val layout = WorkspaceLayout(
+            workspaceDir = "/workspace",
+            writableRoots = listOf("/workspace", "/storage/emulated/0/Documents"),
+            approvalRoots = listOf("/storage/emulated/0/Documents/Restricted"),
+        )
+        val rules = listOf(PermissionRule(id = "all", tool = "*"))
+        fun decide(tool: String, path: String): PermissionDecision {
+            val call = PermissionNormalizer.normalize(
+                tool,
+                buildJsonObject { put("path", path) },
+                workspaceLayout = layout,
+            )
+            return PermissionKernel.evaluate(call, context(PermissionMode.TRUSTED, rules))
+        }
+        val parent = "/storage/emulated/0/Documents"
+        assertTrue(decide("workspace_write_file", "$parent/report.txt") is PermissionDecision.Allow)
+        assertTrue(decide("workspace_write_file", "$parent/Restricted/report.txt") is PermissionDecision.Ask)
+        assertTrue(decide("workspace_edit_file", "$parent/Restricted/report.txt") is PermissionDecision.Ask)
+    }
+
+    @Test
     fun restartingJobsCannotBypassBackgroundDelegationEnvelope() {
         val restart = PermissionNormalizer.normalize("job_restart", buildJsonObject { put("job_id", "task-1") })
         val result = PermissionKernel.evaluate(restart, PermissionContext.background())

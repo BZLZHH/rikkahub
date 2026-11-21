@@ -15,8 +15,8 @@ It ships under its own application ID and version line, so it can be installed a
 | | |
 |---|---|
 | Application ID | `me.rerere.rikkahub.enhanced` |
-| Current version | `3.2.0-rhe.1.0` (versionCode `196001`) |
-| Upstream baseline | RikkaHub `3.2.0` (versionCode `196`) |
+| Current version | `3.3.0-rhe.1.0` (versionCode `197001`) |
+| Upstream baseline | RikkaHub `3.3.0` (versionCode `197`) |
 | License | AGPL-3.0 |
 
 ## What this fork adds

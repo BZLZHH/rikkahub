@@ -15,8 +15,8 @@ RikkaHub Enhanced 跟随上游 RikkaHub，并针对**长时间无人值守运行
 | | |
 |---|---|
 | 应用 ID | `me.rerere.rikkahub.enhanced` |
-| 当前版本 | `3.2.0-rhe.1.0`（versionCode `196001`） |
-| 上游基线 | RikkaHub `3.2.0`（versionCode `196`） |
+| 当前版本 | `3.3.0-rhe.1.0`（versionCode `197001`） |
+| 上游基线 | RikkaHub `3.3.0`（versionCode `197`） |
 | 许可证 | AGPL-3.0 |
 
 ## 相比上游新增

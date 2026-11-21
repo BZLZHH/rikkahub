@@ -5,14 +5,15 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import me.rerere.rikkahub.data.model.MemoryFile
 
 /**
- * v25 is the last shared schema. Enhanced shipped v26..35, while upstream independently
- * shipped incompatible v26..33. In particular, Enhanced v29 also has a retired workflow
+ * v25 is the last shared schema. Enhanced shipped v26..36, while upstream independently
+ * shipped incompatible v26..34. In particular, Enhanced v29 also has a retired workflow
  * variant. A version number alone therefore cannot identify the schema being upgraded.
  *
  * Go straight to a NEW version from every forked version; never run the other branch's
  * auto migrations. Inspect actual tables/columns, add only missing structures, and run
  * upstream data conversions only when their destination table did not already exist.
- * Room wraps this bridge in its upgrade transaction and validates the final schema.
+ * The bridge leaves any upstream storage_mounts column in place for Migration_36_37.
+ * Room wraps the upgrade in a transaction and validates the final schema.
  * Legacy MemoryEntity and retired workflow tables are deliberately retained, with data.
  */
 internal val MigrationsTo36: Array<Migration> = (25..35).map { from ->
@@ -52,7 +53,7 @@ private fun SupportSQLiteDatabase.hasTable(table: String): Boolean = query(
     arrayOf(table),
 ).use { it.moveToFirst() }
 
-private fun SupportSQLiteDatabase.addColumnIfMissing(table: String, column: String, definition: String) {
+internal fun SupportSQLiteDatabase.addColumnIfMissing(table: String, column: String, definition: String) {
     val exists = query("PRAGMA table_info(`$table`)").use { cursor ->
         val name = cursor.getColumnIndexOrThrow("name")
         var found = false

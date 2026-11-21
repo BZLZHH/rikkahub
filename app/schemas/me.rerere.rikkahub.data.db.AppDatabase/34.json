@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 34,
-    "identityHash": "618ea916c5b97a14413d0fd6c7894db4",
+    "identityHash": "4c94f9b43fb6614c97afcc5e53648650",
     "entities": [
       {
         "tableName": "ConversationEntity",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `assistant_id` TEXT NOT NULL DEFAULT '0950e2dc-9bd5-4801-afa3-aa887aa36b4e', `title` TEXT NOT NULL, `nodes` TEXT NOT NULL, `create_at` INTEGER NOT NULL, `update_at` INTEGER NOT NULL, `suggestions` TEXT NOT NULL DEFAULT '[]', `is_pinned` INTEGER NOT NULL DEFAULT 0, `custom_system_prompt` TEXT NOT NULL DEFAULT '', `mode_injection_ids` TEXT NOT NULL DEFAULT '[]', `lorebook_ids` TEXT NOT NULL DEFAULT '[]', `workspace_cwd` TEXT NOT NULL DEFAULT '', `folder_id` TEXT NOT NULL DEFAULT '', PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `assistant_id` TEXT NOT NULL DEFAULT '0950e2dc-9bd5-4801-afa3-aa887aa36b4e', `title` TEXT NOT NULL, `nodes` TEXT NOT NULL, `create_at` INTEGER NOT NULL, `update_at` INTEGER NOT NULL, `suggestions` TEXT NOT NULL DEFAULT '[]', `is_pinned` INTEGER NOT NULL DEFAULT 0, `custom_system_prompt` TEXT NOT NULL DEFAULT '', `mode_injection_ids` TEXT NOT NULL DEFAULT '[]', `lorebook_ids` TEXT NOT NULL DEFAULT '[]', `workspace_cwd` TEXT NOT NULL DEFAULT '', `folder_id` TEXT NOT NULL DEFAULT '', `config` TEXT NOT NULL DEFAULT '', PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -93,6 +93,13 @@
             "affinity": "TEXT",
             "notNull": true,
             "defaultValue": "''"
+          },
+          {
+            "fieldPath": "config",
+            "columnName": "config",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
           }
         ],
         "primaryKey": {
@@ -103,18 +110,18 @@
         }
       },
       {
-        "tableName": "MemoryEntity",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `assistant_id` TEXT NOT NULL, `content` TEXT NOT NULL)",
+        "tableName": "memory_file",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`assistant_id` TEXT NOT NULL, `path` TEXT NOT NULL, `content` TEXT NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`assistant_id`, `path`))",
         "fields": [
-          {
-            "fieldPath": "id",
-            "columnName": "id",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
           {
             "fieldPath": "assistantId",
             "columnName": "assistant_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "path",
+            "columnName": "path",
             "affinity": "TEXT",
             "notNull": true
           },
@@ -123,14 +130,58 @@
             "columnName": "content",
             "affinity": "TEXT",
             "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
           }
         ],
         "primaryKey": {
-          "autoGenerate": true,
+          "autoGenerate": false,
           "columnNames": [
-            "id"
+            "assistant_id",
+            "path"
           ]
         }
+      },
+      {
+        "tableName": "memory_consolidation",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`conversation_id` TEXT NOT NULL, `consolidated_at` INTEGER NOT NULL, PRIMARY KEY(`conversation_id`), FOREIGN KEY(`conversation_id`) REFERENCES `ConversationEntity`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "conversationId",
+            "columnName": "conversation_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "consolidatedAt",
+            "columnName": "consolidated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "conversation_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "ConversationEntity",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "conversation_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
       },
       {
         "tableName": "GenMediaEntity",
@@ -229,13 +280,14 @@
         },
         "indices": [
           {
-            "name": "index_message_node_conversation_id",
+            "name": "index_message_node_conversation_id_node_index",
             "unique": false,
             "columnNames": [
-              "conversation_id"
+              "conversation_id",
+              "node_index"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_message_node_conversation_id` ON `${TABLE_NAME}` (`conversation_id`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_message_node_conversation_id_node_index` ON `${TABLE_NAME}` (`conversation_id`, `node_index`)"
           }
         ],
         "foreignKeys": [
@@ -422,7 +474,7 @@
       },
       {
         "tableName": "workspaces",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `root` TEXT NOT NULL, `shell_status` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `last_access_at` INTEGER, `tool_approvals` TEXT NOT NULL DEFAULT '{}', `shell_compatibility_mode` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `root` TEXT NOT NULL, `shell_status` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `last_access_at` INTEGER, `tool_approvals` TEXT NOT NULL DEFAULT '{}', `shell_compatibility_mode` INTEGER NOT NULL DEFAULT 0, `type` TEXT NOT NULL DEFAULT 'LOCAL', `ssh_config` TEXT, `storage_mounts` TEXT NOT NULL DEFAULT '[]', PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -478,6 +530,25 @@
             "affinity": "INTEGER",
             "notNull": true,
             "defaultValue": "0"
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'LOCAL'"
+          },
+          {
+            "fieldPath": "sshConfig",
+            "columnName": "ssh_config",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "storageMounts",
+            "columnName": "storage_mounts",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'[]'"
           }
         ],
         "primaryKey": {
@@ -562,375 +633,14 @@
         ]
       },
       {
-        "tableName": "workspace_jobs",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `workspace_id` TEXT NOT NULL, `def_id` TEXT, `assistant_id` TEXT, `conversation_id` TEXT, `name` TEXT NOT NULL, `reason` TEXT, `command` TEXT NOT NULL, `cwd` TEXT NOT NULL, `args_json` TEXT NOT NULL, `mode` TEXT NOT NULL, `status` TEXT NOT NULL, `exit_code` INTEGER, `pid` INTEGER, `trigger_source` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `started_at` INTEGER, `finished_at` INTEGER, `runtime_ms` INTEGER, `log_bytes_out` INTEGER NOT NULL, `log_bytes_err` INTEGER NOT NULL, `log_truncated` INTEGER NOT NULL, `error` TEXT, `deferred_reason` TEXT, `wake_state` TEXT NOT NULL, `notify` INTEGER NOT NULL, `auto_wake` INTEGER NOT NULL, `max_runtime_ms` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "tableName": "media_creation_session",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `draft` TEXT NOT NULL, `create_at` INTEGER NOT NULL, `update_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
             "columnName": "id",
             "affinity": "TEXT",
             "notNull": true
-          },
-          {
-            "fieldPath": "workspaceId",
-            "columnName": "workspace_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "defId",
-            "columnName": "def_id",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "assistantId",
-            "columnName": "assistant_id",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "conversationId",
-            "columnName": "conversation_id",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "name",
-            "columnName": "name",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "reason",
-            "columnName": "reason",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "command",
-            "columnName": "command",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "cwd",
-            "columnName": "cwd",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "argsJson",
-            "columnName": "args_json",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "mode",
-            "columnName": "mode",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "status",
-            "columnName": "status",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "exitCode",
-            "columnName": "exit_code",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "pid",
-            "columnName": "pid",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "triggerSource",
-            "columnName": "trigger_source",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "startedAt",
-            "columnName": "started_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "finishedAt",
-            "columnName": "finished_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "runtimeMs",
-            "columnName": "runtime_ms",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "logBytesOut",
-            "columnName": "log_bytes_out",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "logBytesErr",
-            "columnName": "log_bytes_err",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "logTruncated",
-            "columnName": "log_truncated",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "error",
-            "columnName": "error",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "deferredReason",
-            "columnName": "deferred_reason",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "wakeState",
-            "columnName": "wake_state",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "notify",
-            "columnName": "notify",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "autoWake",
-            "columnName": "auto_wake",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "maxRuntimeMs",
-            "columnName": "max_runtime_ms",
-            "affinity": "INTEGER",
-            "notNull": true
-          }
-        ],
-        "primaryKey": {
-          "autoGenerate": false,
-          "columnNames": [
-            "id"
-          ]
-        },
-        "indices": [
-          {
-            "name": "index_workspace_jobs_workspace_id_created_at",
-            "unique": false,
-            "columnNames": [
-              "workspace_id",
-              "created_at"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_workspace_jobs_workspace_id_created_at` ON `${TABLE_NAME}` (`workspace_id`, `created_at`)"
-          },
-          {
-            "name": "index_workspace_jobs_status",
-            "unique": false,
-            "columnNames": [
-              "status"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_workspace_jobs_status` ON `${TABLE_NAME}` (`status`)"
-          }
-        ]
-      },
-      {
-        "tableName": "workspace_job_defs",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `workspace_id` TEXT NOT NULL, `name` TEXT NOT NULL, `command` TEXT NOT NULL, `description` TEXT, `cwd` TEXT NOT NULL, `mode` TEXT NOT NULL, `params_json` TEXT NOT NULL, `env_json` TEXT NOT NULL, `trigger_json` TEXT, `enabled` INTEGER NOT NULL, `notify` INTEGER NOT NULL, `auto_wake` INTEGER NOT NULL, `max_runtime_ms` INTEGER NOT NULL, `require_keep_alive` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `last_run_at` INTEGER, `next_run_at` INTEGER, `run_count` INTEGER NOT NULL, `last_status` TEXT, PRIMARY KEY(`id`))",
-        "fields": [
-          {
-            "fieldPath": "id",
-            "columnName": "id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "workspaceId",
-            "columnName": "workspace_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "name",
-            "columnName": "name",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "command",
-            "columnName": "command",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "description",
-            "columnName": "description",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "cwd",
-            "columnName": "cwd",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "mode",
-            "columnName": "mode",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "paramsJson",
-            "columnName": "params_json",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "envJson",
-            "columnName": "env_json",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "triggerJson",
-            "columnName": "trigger_json",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "enabled",
-            "columnName": "enabled",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "notify",
-            "columnName": "notify",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "autoWake",
-            "columnName": "auto_wake",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "maxRuntimeMs",
-            "columnName": "max_runtime_ms",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "requireKeepAlive",
-            "columnName": "require_keep_alive",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "updatedAt",
-            "columnName": "updated_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "lastRunAt",
-            "columnName": "last_run_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "nextRunAt",
-            "columnName": "next_run_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "runCount",
-            "columnName": "run_count",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "lastStatus",
-            "columnName": "last_status",
-            "affinity": "TEXT"
-          }
-        ],
-        "primaryKey": {
-          "autoGenerate": false,
-          "columnNames": [
-            "id"
-          ]
-        },
-        "indices": [
-          {
-            "name": "index_workspace_job_defs_workspace_id_name",
-            "unique": true,
-            "columnNames": [
-              "workspace_id",
-              "name"
-            ],
-            "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_workspace_job_defs_workspace_id_name` ON `${TABLE_NAME}` (`workspace_id`, `name`)"
-          },
-          {
-            "name": "index_workspace_job_defs_enabled_next_run_at",
-            "unique": false,
-            "columnNames": [
-              "enabled",
-              "next_run_at"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_workspace_job_defs_enabled_next_run_at` ON `${TABLE_NAME}` (`enabled`, `next_run_at`)"
-          }
-        ]
-      },
-      {
-        "tableName": "agent_runs",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `workspace_id` TEXT NOT NULL, `conversation_id` TEXT, `assistant_id` TEXT, `title` TEXT NOT NULL, `prompt` TEXT NOT NULL, `model_id` TEXT, `tool_groups_json` TEXT NOT NULL, `args_json` TEXT NOT NULL, `result_json` TEXT, `transcript` TEXT, `status` TEXT NOT NULL, `steps_done` INTEGER NOT NULL, `tool_calls` INTEGER NOT NULL, `tokens_in` INTEGER NOT NULL, `tokens_out` INTEGER NOT NULL, `trigger_source` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `started_at` INTEGER, `finished_at` INTEGER, `runtime_ms` INTEGER, `error` TEXT, `notify` INTEGER NOT NULL, `auto_wake` INTEGER NOT NULL, `max_runtime_ms` INTEGER NOT NULL, PRIMARY KEY(`id`))",
-        "fields": [
-          {
-            "fieldPath": "id",
-            "columnName": "id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "workspaceId",
-            "columnName": "workspace_id",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "conversationId",
-            "columnName": "conversation_id",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "assistantId",
-            "columnName": "assistant_id",
-            "affinity": "TEXT"
           },
           {
             "fieldPath": "title",
@@ -939,115 +649,56 @@
             "notNull": true
           },
           {
-            "fieldPath": "prompt",
-            "columnName": "prompt",
+            "fieldPath": "draft",
+            "columnName": "draft",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "modelId",
-            "columnName": "model_id",
-            "affinity": "TEXT"
+            "fieldPath": "createAt",
+            "columnName": "create_at",
+            "affinity": "INTEGER",
+            "notNull": true
           },
           {
-            "fieldPath": "toolGroupsJson",
-            "columnName": "tool_groups_json",
+            "fieldPath": "updateAt",
+            "columnName": "update_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "media_creation_node",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `session_id` TEXT NOT NULL, `selected_record_id` TEXT NOT NULL, `create_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`session_id`) REFERENCES `media_creation_session`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "argsJson",
-            "columnName": "args_json",
+            "fieldPath": "sessionId",
+            "columnName": "session_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "resultJson",
-            "columnName": "result_json",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "transcript",
-            "columnName": "transcript",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "status",
-            "columnName": "status",
+            "fieldPath": "selectedRecordId",
+            "columnName": "selected_record_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "stepsDone",
-            "columnName": "steps_done",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "toolCalls",
-            "columnName": "tool_calls",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "tokensIn",
-            "columnName": "tokens_in",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "tokensOut",
-            "columnName": "tokens_out",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "triggerSource",
-            "columnName": "trigger_source",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "created_at",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "startedAt",
-            "columnName": "started_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "finishedAt",
-            "columnName": "finished_at",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "runtimeMs",
-            "columnName": "runtime_ms",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "error",
-            "columnName": "error",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "notify",
-            "columnName": "notify",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "autoWake",
-            "columnName": "auto_wake",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "maxRuntimeMs",
-            "columnName": "max_runtime_ms",
+            "fieldPath": "createAt",
+            "columnName": "create_at",
             "affinity": "INTEGER",
             "notNull": true
           }
@@ -1060,29 +711,32 @@
         },
         "indices": [
           {
-            "name": "index_agent_runs_workspace_id_created_at",
+            "name": "index_media_creation_node_session_id",
             "unique": false,
             "columnNames": [
-              "workspace_id",
-              "created_at"
+              "session_id"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_agent_runs_workspace_id_created_at` ON `${TABLE_NAME}` (`workspace_id`, `created_at`)"
-          },
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_media_creation_node_session_id` ON `${TABLE_NAME}` (`session_id`)"
+          }
+        ],
+        "foreignKeys": [
           {
-            "name": "index_agent_runs_status",
-            "unique": false,
-            "columnNames": [
-              "status"
+            "table": "media_creation_session",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "session_id"
             ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_agent_runs_status` ON `${TABLE_NAME}` (`status`)"
+            "referencedColumns": [
+              "id"
+            ]
           }
         ]
       },
       {
-        "tableName": "workflow_runs",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `workspaceId` TEXT NOT NULL, `conversationId` TEXT, `assistantId` TEXT, `name` TEXT NOT NULL, `fingerprint` TEXT NOT NULL, `modelName` TEXT, `scriptPath` TEXT, `status` TEXT NOT NULL, `phase` TEXT, `progressJson` TEXT NOT NULL, `phasesJson` TEXT NOT NULL DEFAULT '[]', `resultJson` TEXT, `error` TEXT, `agentsCalled` INTEGER NOT NULL, `agentsReused` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `startedAt` INTEGER, `finishedAt` INTEGER, `runtimeMs` INTEGER, PRIMARY KEY(`id`))",
+        "tableName": "media_creation_record",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `session_id` TEXT NOT NULL, `node_id` TEXT NOT NULL, `provider_id` TEXT NOT NULL, `provider_name` TEXT NOT NULL, `model_id` TEXT NOT NULL, `kind` TEXT NOT NULL, `prompt` TEXT NOT NULL, `params` TEXT NOT NULL, `inputs` TEXT NOT NULL, `status` TEXT NOT NULL, `task_id` TEXT, `error` TEXT, `outputs` TEXT NOT NULL, `create_at` INTEGER NOT NULL, `update_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`session_id`) REFERENCES `media_creation_session`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`node_id`) REFERENCES `media_creation_node`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "id",
@@ -1091,42 +745,58 @@
             "notNull": true
           },
           {
-            "fieldPath": "workspaceId",
-            "columnName": "workspaceId",
+            "fieldPath": "sessionId",
+            "columnName": "session_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "conversationId",
-            "columnName": "conversationId",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "assistantId",
-            "columnName": "assistantId",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "name",
-            "columnName": "name",
+            "fieldPath": "nodeId",
+            "columnName": "node_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "fingerprint",
-            "columnName": "fingerprint",
+            "fieldPath": "providerId",
+            "columnName": "provider_id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "modelName",
-            "columnName": "modelName",
-            "affinity": "TEXT"
+            "fieldPath": "providerName",
+            "columnName": "provider_name",
+            "affinity": "TEXT",
+            "notNull": true
           },
           {
-            "fieldPath": "scriptPath",
-            "columnName": "scriptPath",
-            "affinity": "TEXT"
+            "fieldPath": "modelId",
+            "columnName": "model_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "prompt",
+            "columnName": "prompt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "params",
+            "columnName": "params",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inputs",
+            "columnName": "inputs",
+            "affinity": "TEXT",
+            "notNull": true
           },
           {
             "fieldPath": "status",
@@ -1135,26 +805,8 @@
             "notNull": true
           },
           {
-            "fieldPath": "phase",
-            "columnName": "phase",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "progressJson",
-            "columnName": "progressJson",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "phasesJson",
-            "columnName": "phasesJson",
-            "affinity": "TEXT",
-            "notNull": true,
-            "defaultValue": "'[]'"
-          },
-          {
-            "fieldPath": "resultJson",
-            "columnName": "resultJson",
+            "fieldPath": "taskId",
+            "columnName": "task_id",
             "affinity": "TEXT"
           },
           {
@@ -1163,37 +815,22 @@
             "affinity": "TEXT"
           },
           {
-            "fieldPath": "agentsCalled",
-            "columnName": "agentsCalled",
+            "fieldPath": "outputs",
+            "columnName": "outputs",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createAt",
+            "columnName": "create_at",
             "affinity": "INTEGER",
             "notNull": true
           },
           {
-            "fieldPath": "agentsReused",
-            "columnName": "agentsReused",
+            "fieldPath": "updateAt",
+            "columnName": "update_at",
             "affinity": "INTEGER",
             "notNull": true
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "createdAt",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "startedAt",
-            "columnName": "startedAt",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "finishedAt",
-            "columnName": "finishedAt",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "runtimeMs",
-            "columnName": "runtimeMs",
-            "affinity": "INTEGER"
           }
         ],
         "primaryKey": {
@@ -1201,193 +838,199 @@
           "columnNames": [
             "id"
           ]
-        }
-      },
-      {
-        "tableName": "workflow_agent_results",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`fingerprint` TEXT NOT NULL, `callIndex` INTEGER NOT NULL, `prompt` TEXT NOT NULL, `schemaJson` TEXT, `label` TEXT, `resultText` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`fingerprint`, `callIndex`))",
-        "fields": [
+        },
+        "indices": [
           {
-            "fieldPath": "fingerprint",
-            "columnName": "fingerprint",
-            "affinity": "TEXT",
-            "notNull": true
+            "name": "index_media_creation_record_session_id",
+            "unique": false,
+            "columnNames": [
+              "session_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_media_creation_record_session_id` ON `${TABLE_NAME}` (`session_id`)"
           },
           {
-            "fieldPath": "callIndex",
-            "columnName": "callIndex",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "prompt",
-            "columnName": "prompt",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "schemaJson",
-            "columnName": "schemaJson",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "label",
-            "columnName": "label",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "resultText",
-            "columnName": "resultText",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "createdAt",
-            "columnName": "createdAt",
-            "affinity": "INTEGER",
-            "notNull": true
+            "name": "index_media_creation_record_node_id",
+            "unique": false,
+            "columnNames": [
+              "node_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_media_creation_record_node_id` ON `${TABLE_NAME}` (`node_id`)"
           }
         ],
-        "primaryKey": {
-          "autoGenerate": false,
-          "columnNames": [
-            "fingerprint",
-            "callIndex"
-          ]
-        }
+        "foreignKeys": [
+          {
+            "table": "media_creation_session",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "session_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "media_creation_node",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "node_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
       },
       {
-        "tableName": "workflow_agents",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`runId` TEXT NOT NULL, `callIndex` INTEGER NOT NULL, `label` TEXT, `prompt` TEXT NOT NULL, `schemaJson` TEXT, `phase` TEXT, `status` TEXT NOT NULL, `reused` INTEGER NOT NULL, `modelId` TEXT, `modelName` TEXT, `steps` INTEGER NOT NULL, `toolCalls` INTEGER NOT NULL, `tokensIn` INTEGER NOT NULL, `tokensOut` INTEGER NOT NULL, `reasoning` TEXT, `sessionId` TEXT, `resultText` TEXT, `error` TEXT, `startedAt` INTEGER NOT NULL, `finishedAt` INTEGER, `runtimeMs` INTEGER, PRIMARY KEY(`runId`, `callIndex`))",
+        "tableName": "translation_history",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `source_text` TEXT NOT NULL, `translated_text` TEXT NOT NULL, `target_language` TEXT NOT NULL, `model_id` TEXT NOT NULL, `create_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
-            "fieldPath": "runId",
-            "columnName": "runId",
+            "fieldPath": "id",
+            "columnName": "id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "callIndex",
-            "columnName": "callIndex",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "label",
-            "columnName": "label",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "prompt",
-            "columnName": "prompt",
+            "fieldPath": "sourceText",
+            "columnName": "source_text",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "schemaJson",
-            "columnName": "schemaJson",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "phase",
-            "columnName": "phase",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "status",
-            "columnName": "status",
+            "fieldPath": "translatedText",
+            "columnName": "translated_text",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "reused",
-            "columnName": "reused",
-            "affinity": "INTEGER",
+            "fieldPath": "targetLanguage",
+            "columnName": "target_language",
+            "affinity": "TEXT",
             "notNull": true
           },
           {
             "fieldPath": "modelId",
-            "columnName": "modelId",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "modelName",
-            "columnName": "modelName",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "steps",
-            "columnName": "steps",
-            "affinity": "INTEGER",
+            "columnName": "model_id",
+            "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "toolCalls",
-            "columnName": "toolCalls",
+            "fieldPath": "createAt",
+            "columnName": "create_at",
             "affinity": "INTEGER",
             "notNull": true
-          },
-          {
-            "fieldPath": "tokensIn",
-            "columnName": "tokensIn",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "tokensOut",
-            "columnName": "tokensOut",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "reasoning",
-            "columnName": "reasoning",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "sessionId",
-            "columnName": "sessionId",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "resultText",
-            "columnName": "resultText",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "error",
-            "columnName": "error",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "startedAt",
-            "columnName": "startedAt",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "finishedAt",
-            "columnName": "finishedAt",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "runtimeMs",
-            "columnName": "runtimeMs",
-            "affinity": "INTEGER"
           }
         ],
         "primaryKey": {
           "autoGenerate": false,
           "columnNames": [
-            "runId",
-            "callIndex"
+            "id"
           ]
-        }
+        },
+        "indices": [
+          {
+            "name": "index_translation_history_create_at",
+            "unique": false,
+            "columnNames": [
+              "create_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_translation_history_create_at` ON `${TABLE_NAME}` (`create_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "usage_record",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `created_at` INTEGER NOT NULL, `source` TEXT NOT NULL, `provider_id` TEXT, `model_id` TEXT, `model_name` TEXT, `assistant_id` TEXT, `conversation_id` TEXT, `prompt_tokens` INTEGER NOT NULL, `completion_tokens` INTEGER NOT NULL, `cached_tokens` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerId",
+            "columnName": "provider_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "modelId",
+            "columnName": "model_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "modelName",
+            "columnName": "model_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "assistantId",
+            "columnName": "assistant_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "conversationId",
+            "columnName": "conversation_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "promptTokens",
+            "columnName": "prompt_tokens",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completionTokens",
+            "columnName": "completion_tokens",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cachedTokens",
+            "columnName": "cached_tokens",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_usage_record_created_at",
+            "unique": false,
+            "columnNames": [
+              "created_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_usage_record_created_at` ON `${TABLE_NAME}` (`created_at`)"
+          }
+        ]
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '618ea916c5b97a14413d0fd6c7894db4')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '4c94f9b43fb6614c97afcc5e53648650')"
     ]
   }
 }

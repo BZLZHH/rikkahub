@@ -69,9 +69,8 @@ import me.rerere.rikkahub.utils.JsonInstant
         TranslationHistoryEntity::class,
         UsageRecordEntity::class,
     ],
-    // Enhanced shipped v35; upstream shipped a different v33. Never reuse either version.
-    // Versions 25..35 converge through explicit, shape-aware migrations (see MigrationTo36).
-    version = 36,
+    // Enhanced shipped v36; upstream independently shipped v34 with shared storage mounts.
+    version = 37,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -92,8 +91,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 22, to = 23, spec = Migration_22_23::class),
         AutoMigration(from = 23, to = 24),
         AutoMigration(from = 24, to = 25),
-        // Versions 26..33 have incompatible Enhanced/upstream schemas. Do not add
-        // auto migrations across that fork: MigrationTo36 handles both histories.
+        // Version numbers overlap across the fork. The explicit bridge detects each schema.
     ]
 )
 @TypeConverters(TokenUsageConverter::class)

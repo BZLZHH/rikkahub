@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the real v36 Kotlin bridge on SQLite without Android/Gradle.
+"""Run the real fork-merge migrations through v37 on SQLite without Android/Gradle.
 
 Requires kotlinc, java and sqlite-jdbc (auto-detected in ~/.gradle/caches, or pass
 --sqlite-jdbc). Android interfaces are minimal test adapters; migration SQL and
@@ -16,11 +16,13 @@ import tempfile
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / "settings.gradle.kts").exists())
 SCHEMAS = ROOT / "app/schemas"
 DATABASE = "me.rerere.rikkahub.data.db.AppDatabase"
+MOUNT_LIST = '[{"path":"/storage/emulated/0/Documents","writable":true}]'
 MIGRATIONS = ROOT / "app/src/main/java/me/rerere/rikkahub/data/db/migrations"
 STUBS = json.loads(r'''{"Room.kt":"package androidx.room.migration\nimport androidx.sqlite.db.SupportSQLiteDatabase\nabstract class Migration(val startVersion: Int, val endVersion: Int) { abstract fun migrate(db: SupportSQLiteDatabase) }\ninterface AutoMigrationSpec { fun onPostMigrate(db: SupportSQLiteDatabase) {} }\n","Sqlite.kt":"package androidx.sqlite.db\ninterface SupportSQLiteDatabase {\n fun execSQL(sql:String)\n fun execSQL(sql:String, args:Array<out Any?>)\n fun query(sql:String): Cursor\n fun query(sql:String,args:Array<out Any?>): Cursor\n fun beginTransaction()\n fun setTransactionSuccessful()\n fun endTransaction()\n}\ninterface Cursor: java.io.Closeable {\n fun moveToFirst():Boolean\n fun moveToNext():Boolean\n fun getString(index:Int):String\n fun getColumnIndexOrThrow(name:String):Int\n}\n","Log.kt":"package android.util\nobject Log { fun i(tag:String,message:String) = 0 }\n","Tracker.kt":"package me.rerere.rikkahub.data.db\nobject DatabaseMigrationTracker { fun onMigrationStart(from:Int,to:Int) {} ; fun onMigrationEnd() {} }\n","Memory.kt":"package me.rerere.rikkahub.data.model\nobject MemoryFile { const val PROFILE_PATH = \"/profile.md\" }\n"}''')
 HEADER = r'''import java.sql.DriverManager
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.Cursor
+import me.rerere.rikkahub.data.db.migrations.Migration_36_37
 import me.rerere.rikkahub.data.db.migrations.MigrationsTo36
 
 class Db : SupportSQLiteDatabase, java.io.Closeable {
@@ -62,22 +64,30 @@ MAIN = r'''fun main() {
  Db().use { expected ->
   __TARGET_DDL__.forEach(expected::execSQL)
   val targetTables = __TARGET_TABLES__
+  val mountList = __MOUNT_LIST__
   val fixtures = __FIXTURES__
   fixtures.forEach { fixture -> Db().use { db ->
    fixture.ddl.forEach(db::execSQL);fixture.seed.forEach(db::execSQL)
    val before=fixture.tables.associateWith { db.rows("SELECT * FROM `$it`") }
-   val migration=MigrationsTo36.single { it.startVersion==fixture.version }
+   val bridge = MigrationsTo36.singleOrNull { it.startVersion == fixture.version }
+   check(bridge != null || fixture.version == Migration_36_37.startVersion)
+   fun migrate() {
+    bridge?.migrate(db)
+    Migration_36_37.migrate(db)
+   }
    fun verify() {
     targetTables.forEach { table -> check(db.shape(table)==expected.shape(table)) { "Schema mismatch ${fixture.name} $table\nACTUAL ${db.shape(table)}\nEXPECTED ${expected.shape(table)}" } }
     before.forEach { (table,snapshot) -> val select=snapshot.first.joinToString { "`$it`" };check(db.rows("SELECT $select FROM `$table`").second==snapshot.second) { "Data loss ${fixture.name} $table" } }
     check(db.count("usage_record")==1) { "Duplicate usage ${fixture.name}" }
     check(db.count("memory_file")==1)
+    val expectedMounts = if ("storage_mounts" in before.getValue("workspaces").first) mountList else "[]"
+    check(db.rows("SELECT storage_mounts FROM workspaces").second == listOf(listOf(expectedMounts))) { "Mount list mismatch ${fixture.name}" }
     check(db.rows("PRAGMA foreign_key_check").second.isEmpty()) { "FK violation ${fixture.name}" }
     if("usage_record" !in fixture.tables) check(db.rows("SELECT prompt_tokens,completion_tokens,cached_tokens FROM usage_record").second.single()==listOf("7","3","2"))
     if("MemoryEntity" in fixture.tables) check(db.rows("SELECT content FROM memory_file").second.single().single()!!.contains("- [stated] keep"))
    }
-   migration.migrate(db);verify();migration.migrate(db);verify()
-   println("PASS ${fixture.name}: schema36 exact metadata, every source row preserved, replay safe")
+   migrate();verify();migrate();verify()
+   println("PASS ${fixture.name}: schema37 exact metadata, every source row preserved, replay safe")
   } }
   println("PASS ALL ${fixtures.size} HISTORICAL SCHEMAS")
  }
@@ -116,10 +126,13 @@ def fixture(index, family, version):
                     "role": "assistant", "createdAt": "2026-08-12T09:00:00",
                     "usage": {"promptTokens": 7, "completionTokens": 3, "cachedTokens": 2},
                 }]) + "'")
+            elif entity["tableName"] == "workspaces" and field["columnName"] == "storage_mounts":
+                values.append("'" + MOUNT_LIST + "'")
             else:
                 values.append("1" if field["affinity"] in ("INTEGER", "REAL") else "'keep'")
         inserts.append(f"INSERT INTO `{entity['tableName']}` ({','.join(columns)}) VALUES ({','.join(values)})")
-    label = f"{family or 'upstream'}/{version}"
+    branch = family or ("enhanced" if version == 36 else "upstream")
+    label = f"{branch}/{version}"
     return (f"fun fixture{index}() = Fixture({quote(label)},{version},"
             f"{kotlin_list(ddl(document))},{kotlin_list(inserts)},"
             f"{kotlin_list([entity['tableName'] for entity in document['entities']])})\n")
@@ -140,12 +153,13 @@ def run():
     java = shutil.which("java")
     if not compiler or not java:
         parser.error("kotlinc and java must be on PATH")
-    cases = [("", version) for version in range(25, 34)] + [
+    cases = [("", version) for version in range(25, 35)] + [
         ("enhanced", version) for version in range(26, 36)
-    ] + [("enhanced-legacy29", 29)]
-    target = schema("", 36)
+    ] + [("enhanced-legacy29", 29), ("", 36)]
+    target = schema("", 37)
     main = (MAIN.replace("__TARGET_DDL__", kotlin_list(ddl(target)))
             .replace("__TARGET_TABLES__", kotlin_list([entity["tableName"] for entity in target["entities"]]))
+            .replace("__MOUNT_LIST__", quote(MOUNT_LIST))
             .replace("__FIXTURES__", "listOf(" + ",".join(f"fixture{i}()" for i in range(len(cases))) + ")"))
     with tempfile.TemporaryDirectory(prefix="rikkahub-db-migration-") as temp:
         folder = Path(temp)
@@ -155,7 +169,7 @@ def run():
             fixture(i, family, version) for i, (family, version) in enumerate(cases)
         ) + main)
         sources = ["MigrationTo36.kt", "Migration_27_28.kt", "Migration_28_29.kt",
-                   "Migration_30_31.kt", "Migration_32_33.kt"]
+                   "Migration_30_31.kt", "Migration_32_33.kt", "Migration_36_37.kt"]
         jar = folder / "test.jar"
         subprocess.run([compiler, *map(str, folder.glob("*.kt")),
                         *(str(MIGRATIONS / source) for source in sources),

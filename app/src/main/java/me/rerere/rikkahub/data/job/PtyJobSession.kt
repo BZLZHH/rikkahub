@@ -8,6 +8,7 @@ import com.termux.terminal.TerminalSessionClient
 import me.rerere.rikkahub.ui.pages.extensions.workspace.createWorkspaceTerminalSession
 import me.rerere.rikkahub.ui.pages.extensions.workspace.activeDnsServers
 import me.rerere.rikkahub.ui.pages.extensions.workspace.toTransport
+import me.rerere.workspace.WorkspaceBindMount
 import me.rerere.workspace.WorkspaceManager
 
 /**
@@ -107,6 +108,7 @@ class PtyJobSession internal constructor(
             env: Map<String, String>,
             shellCompatibilityMode: Boolean,
             logStore: JobLogStore,
+            extraMounts: List<WorkspaceBindMount>,
             cols: Int = DEFAULT_COLS,
             rows: Int = DEFAULT_ROWS,
             onFinished: () -> Unit = {},
@@ -118,6 +120,7 @@ class PtyJobSession internal constructor(
                 command = command,
                 cwd = cwd,
                 extraEnv = env,
+                extraMounts = extraMounts,
             )) { "PTY jobs are not supported by this workspace shell" }
             val session = createWorkspaceTerminalSession(
                 transport = launch.toTransport(),

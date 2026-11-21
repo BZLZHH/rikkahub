@@ -16,12 +16,15 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Exercises both meanings of v26..33, including the real, retired Enhanced v29. */
+private const val MOUNT_LIST = """[{"path":"/storage/emulated/0/Documents","writable":true}]"""
+
+/** Exercises the published schemas from both branches through v37. */
 @RunWith(AndroidJUnit4::class)
 class MigrationTo36Test {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val databaseName = AppDatabase::class.java.name
+    private val migrations = arrayOf(*MigrationsTo36, Migration_36_37)
 
     @get:Rule
     val helper = MigrationTestHelper(
@@ -34,17 +37,18 @@ class MigrationTo36Test {
     @Test
     fun everyPublishedSchemaConvergesWithoutLosingAnyOriginalRow() {
         val fixtures = listOf("" to 25) +
-            (26..33).map { "" to it } +
+            (26..34).map { "" to it } +
             (26..35).map { "enhanced/" to it } +
-            listOf("enhanced-legacy29/" to 29)
+            listOf("enhanced-legacy29/" to 29, "" to 36)
         fixtures.forEach { (family, version) ->
-            val name = "merge-36-${family.replace('/', '-')}$version"
+            val name = "merge-37-${family.replace('/', '-')}$version"
             val snapshot = createHistoricalDatabase(name, family, version)
             try {
                 // Old MemoryEntity and retired workflow tables deliberately survive. Room's
                 // normal schema validation permits extra tables; the snapshots check their data.
-                helper.runMigrationsAndValidate(name, 36, false, *MigrationsTo36).use { db ->
+                helper.runMigrationsAndValidate(name, 37, false, *migrations).use { db ->
                     assertOriginalRows(db, snapshot)
+                    assertStorageMounts(db, snapshot)
                     assertTrue(db.hasTable("workspace_jobs"))
                     assertTrue(db.hasTable("agent_runs"))
                     assertTrue(db.hasTable("workflow_runs"))
@@ -72,8 +76,10 @@ class MigrationTo36Test {
                         assertEquals(1L, db.scalar("SELECT consolidated_at FROM memory_consolidation"))
                     }
                     // A repeat cannot overwrite profiles, reset consolidation, or double-count usage.
-                    MigrationsTo36.first { it.startVersion == version }.migrate(db)
+                    MigrationsTo36.firstOrNull { it.startVersion == version }?.migrate(db)
+                    Migration_36_37.migrate(db)
                     assertOriginalRows(db, snapshot)
+                    assertStorageMounts(db, snapshot)
                     assertEquals(1L, db.scalar("SELECT COUNT(*) FROM usage_record"))
                     assertEquals(1L, db.scalar("SELECT COUNT(*) FROM memory_file"))
                     assertEquals(0L, db.query("PRAGMA foreign_key_check").use { it.count.toLong() })
@@ -86,15 +92,17 @@ class MigrationTo36Test {
 
     @Test
     fun productionFactoryOpensBothHeadsAndSharedVersionUsingRegisteredMigrations() {
-        listOf("enhanced/" to 35, "" to 33, "" to 25, "enhanced-legacy29/" to 29).forEach { (family, version) ->
-            val name = "factory-36-${family.replace('/', '-')}$version"
+        val fixtures = listOf("" to 36, "" to 34, "enhanced/" to 35, "" to 25, "enhanced-legacy29/" to 29)
+        fixtures.forEach { (family, version) ->
+            val name = "factory-37-${family.replace('/', '-')}$version"
             val snapshot = createHistoricalDatabase(name, family, version)
             try {
                 val database = AppDatabaseFactory.create(context, name)
                 try {
                     val db = database.openHelper.writableDatabase
-                    assertEquals(36, db.version)
+                    assertEquals(37, db.version)
                     assertOriginalRows(db, snapshot)
+                    assertStorageMounts(db, snapshot)
                 } finally {
                     database.close()
                 }
@@ -149,6 +157,7 @@ class MigrationTo36Test {
                         when {
                             table == "message_node" && field.getString("columnName") == "messages" ->
                                 """[{"role":"assistant","createdAt":"2026-08-12T09:00:00","usage":{"promptTokens":7,"completionTokens":3,"cachedTokens":2}}]"""
+                            table == "workspaces" && field.getString("columnName") == "storage_mounts" -> MOUNT_LIST
                             field.getString("affinity") == "INTEGER" -> 1L
                             field.getString("affinity") == "REAL" -> 1.0
                             else -> "keep"
@@ -170,6 +179,11 @@ class MigrationTo36Test {
             assertEquals("Preserve row in $table", before.values, db.row(table, before.columns))
             assertEquals("Preserve row count in $table", 1L, db.scalar("SELECT COUNT(*) FROM `$table`"))
         }
+    }
+
+    private fun assertStorageMounts(db: SupportSQLiteDatabase, snapshot: Map<String, TableSnapshot>) {
+        val expected = if ("storage_mounts" in snapshot.getValue("workspaces").columns) MOUNT_LIST else "[]"
+        assertEquals(listOf(expected), db.row("workspaces", listOf("storage_mounts")))
     }
 
     private fun SupportSQLiteDatabase.row(table: String, columns: List<String>): List<String?> =

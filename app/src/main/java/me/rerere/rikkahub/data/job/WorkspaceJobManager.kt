@@ -447,6 +447,7 @@ class WorkspaceJobManager(
                 stderr = errStream,
                 env = env,
                 shellCompatibilityMode = workspace.shellCompatibilityMode,
+                extraMounts = workspace.extraBindMounts(),
             )
         } catch (e: Exception) {
             runCatching { outStream?.close() }
@@ -503,6 +504,7 @@ class WorkspaceJobManager(
                 env = env,
                 shellCompatibilityMode = workspace.shellCompatibilityMode,
                 logStore = logStore,
+                extraMounts = workspace.extraBindMounts(),
             )
         } catch (e: Exception) {
             val failed = job.copy(

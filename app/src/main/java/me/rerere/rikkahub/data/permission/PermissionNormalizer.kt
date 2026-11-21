@@ -190,7 +190,7 @@ object PermissionNormalizer {
     ): NormalizedCall {
         val raw = obj.string("path").trim()
         val path = normalizePathString(raw)
-        val writable = layout.writableRoots.any { isWithin(path, normalizePathString(it)) }
+        val writable = layout.isWritable(raw)
         return NormalizedCall(
             tool = tool,
             effects = setOf(if (write) ToolEffect.FS_WRITE else ToolEffect.FS_READ),
