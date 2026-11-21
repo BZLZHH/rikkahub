@@ -118,6 +118,8 @@ internal val SETTINGS_FIELDS: List<SettingsField<*, *>> = with(SettingsStore) {
         plain(SUGGESTION_PROMPT, Settings::suggestionPrompt) { copy(suggestionPrompt = it) },
         uuid(OCR_MODEL, Settings::ocrModelId) { copy(ocrModelId = it) },
         plain(OCR_PROMPT, Settings::ocrPrompt) { copy(ocrPrompt = it) },
+        plain(DEEPSEEK_OCR_ENABLED, Settings::deepSeekOcrEnabled) { copy(deepSeekOcrEnabled = it) },
+        plain(DEEPSEEK_OCR_API_KEY, Settings::deepSeekOcrApiKey) { copy(deepSeekOcrApiKey = it) },
 
         // 自动压缩
         plain(ENABLE_AUTO_COMPRESS, Settings::enableAutoCompress) { copy(enableAutoCompress = it) },

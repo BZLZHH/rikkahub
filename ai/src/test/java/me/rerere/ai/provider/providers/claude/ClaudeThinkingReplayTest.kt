@@ -27,14 +27,7 @@ class ClaudeThinkingReplayTest {
     private fun blocks(value: String): JsonArray = json.parseToJsonElement(value).jsonArray
 
     private fun assistantBlocks(messages: List<UIMessage>): List<JsonObject> {
-        val method = ClaudeProvider::class.java.getDeclaredMethod(
-            "buildMessages",
-            List::class.java,
-            Boolean::class.javaPrimitiveType,
-            ClaudePromptCacheTtl::class.java,
-        )
-        method.isAccessible = true
-        val request = method.invoke(provider, messages, false, ClaudePromptCacheTtl.FIVE_MINUTES) as JsonArray
+        val request = provider.buildMessages(messages, false, ClaudePromptCacheTtl.FIVE_MINUTES)
         return request
             .filter { it.jsonObject["role"]?.jsonPrimitive?.content == "assistant" }
             .flatMap { it.jsonObject.getValue("content").jsonArray.map { block -> block.jsonObject } }

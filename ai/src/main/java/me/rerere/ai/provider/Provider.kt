@@ -74,6 +74,8 @@ data class TextGenerationParams(
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBody: List<CustomBody> = emptyList(),
     val sessionId: String? = Uuid.random().toString(),
+    val deepSeekRequestTitle: Boolean = false,
+    val deepSeekReminders: Map<String, String> = emptyMap(),
 )
 
 @Serializable

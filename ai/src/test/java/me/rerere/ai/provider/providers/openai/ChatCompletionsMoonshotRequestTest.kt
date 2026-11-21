@@ -29,19 +29,10 @@ class ChatCompletionsMoonshotRequestTest {
         api = ChatCompletionsAPI(OkHttpClient(), KeyRoulette.default())
     }
 
-    // Helper to invoke private buildChatCompletionRequest via reflection
     private fun buildRequest(
         modelId: String,
         reasoningLevel: ReasoningLevel,
     ): JsonObject {
-        val method = ChatCompletionsAPI::class.java.getDeclaredMethod(
-            "buildChatCompletionRequest",
-            List::class.java,
-            TextGenerationParams::class.java,
-            ProviderSetting.OpenAI::class.java,
-            Boolean::class.javaPrimitiveType
-        )
-        method.isAccessible = true
         val model = Model(
             modelId = modelId,
             abilities = listOf(ModelAbility.REASONING)
@@ -51,13 +42,7 @@ class ChatCompletionsMoonshotRequestTest {
             reasoningLevel = reasoningLevel,
         )
         val providerSetting = ProviderSetting.OpenAI(baseUrl = "https://api.moonshot.cn/v1")
-        return method.invoke(
-            api,
-            listOf(UIMessage.user("hi")),
-            params,
-            providerSetting,
-            true
-        ) as JsonObject
+        return api.buildChatCompletionRequest(listOf(UIMessage.user("hi")), params, providerSetting, stream = true)
     }
 
     // #1586: K2.6 思考开启时发送 thinking.keep = "all"（保留式思考）

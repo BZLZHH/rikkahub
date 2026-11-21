@@ -15,10 +15,15 @@ import me.rerere.ai.agent.withRetry
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
+import me.rerere.ai.provider.DeepSeekFileInput
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.deepSeekToolsEnabled
+import me.rerere.ai.provider.primaryDeepSeekApiKey
+import me.rerere.ai.provider.supportsDeepSeekFlash
+import me.rerere.ai.provider.deepseek.DeepSeekFilePurpose
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.limitContext
@@ -26,6 +31,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.prompts.buildMemoryPrompt
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
+import me.rerere.rikkahub.data.ai.transformers.DeepSeekFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
@@ -75,7 +81,10 @@ class ChatTurnContext(
     val workspaceCwd: String?,
     val memories: List<MemoryFile>,
     val tools: List<Tool>,
-)
+    val requestDeepSeekTitle: Boolean = false,
+) {
+    val deepSeekEnabled: Boolean get() = model.deepSeekToolsEnabled && providerSetting.supportsDeepSeekFlash(model)
+}
 
 /** 把会话变成发给模型的请求：系统提示词、上下文裁剪、输入输出转换都在这里 */
 class ChatRequestFactory(
@@ -104,7 +113,11 @@ class ChatRequestFactory(
     )
 
     /** 解析本轮的助手、模型、记忆和工具；MCP 服务名不合法时抛出 InvalidMcpServerNamesException */
-    suspend fun createContext(settings: Settings, conversation: Conversation): ChatTurnContext {
+    suspend fun createContext(
+        settings: Settings,
+        conversation: Conversation,
+        history: List<UIMessage> = conversation.currentMessages,
+    ): ChatTurnContext {
         // 模型、思考级别、搜索、工具等以会话上固定的配置为准
         val assistant = settings.getAssistantOf(conversation)
         val model = settings.getChatModelOf(conversation)
@@ -125,7 +138,9 @@ class ChatRequestFactory(
                 model = model,
                 conversationId = conversation.id,
                 workspaceCwd = conversation.workspaceCwd,
+                latestAttachments = history.lastOrNull { it.role == MessageRole.USER }?.parts.orEmpty(),
             ),
+            requestDeepSeekTitle = settings.enableAutoTitle && conversation.title.isBlank(),
         )
     }
 
@@ -163,10 +178,15 @@ class ChatRequestFactory(
             stream = turn.assistant.streamOutput,
             retry = turn.settings.retryPolicy(),
         )
+        var requestNativeTitle = turn.requestDeepSeekTitle && turn.deepSeekEnabled &&
+            turn.model.deepSeek.conversationTitle && messages.count { it.role == MessageRole.USER && !it.isNoticeOnly } == 1 &&
+            messages.none { it.role == MessageRole.ASSISTANT && (it.stepCount ?: 0) > 0 }
         val hooks = object : AgentHooks {
             override suspend fun prepareStep(messages: List<UIMessage>): StepRequest {
                 Log.i(TAG, "prepareStep: ${turn.model.id}")
-                return buildStep(turn, messages, processingStatus)
+                return buildStep(turn, messages, processingStatus, requestNativeTitle).also {
+                    requestNativeTitle = false
+                }
             }
 
             override suspend fun previewStep(message: UIMessage, newPartsFrom: Int) =
@@ -255,6 +275,7 @@ class ChatRequestFactory(
         turn: ChatTurnContext,
         messages: List<UIMessage>,
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
+        requestNativeTitle: Boolean = false,
     ): StepRequest {
         val assistant = turn.assistant
         val requestMessages = buildList {
@@ -285,7 +306,7 @@ class ChatRequestFactory(
             }
             addAll(messages.limitContext(assistant.contextMessageLimit).withContinuationHint())
         }.transforms(
-            transformers = inputTransformers,
+            transformers = inputTransformersFor(turn),
             context = context,
             model = turn.model,
             assistant = assistant,
@@ -309,8 +330,30 @@ class ChatRequestFactory(
                 addAll(turn.model.customBodies)
             },
             sessionId = turn.conversationId.toString(),
+            deepSeekRequestTitle = requestNativeTitle,
+            deepSeekReminders = if (turn.deepSeekEnabled && turn.model.deepSeek.userMetadata) {
+                messages.deepSeekReminders(turn.model.deepSeek.location, context.resources.configuration.locales[0])
+            } else emptyMap(),
         )
         return StepRequest(requestMessages, params)
+    }
+
+    private fun inputTransformersFor(turn: ChatTurnContext): List<InputMessageTransformer> {
+        if (!turn.deepSeekEnabled) return inputTransformers
+        val purpose = when (turn.model.deepSeek.fileInput) {
+            DeepSeekFileInput.LOCAL -> return inputTransformers
+            DeepSeekFileInput.TEXT -> DeepSeekFilePurpose.TEXT_RECOGNITION
+            DeepSeekFileInput.RICH_LAYOUT -> DeepSeekFilePurpose.RICH_LAYOUT_RECOGNITION
+        }
+        val provider = turn.providerSetting as ProviderSetting.ApiKey
+        return buildList {
+            for (transformer in inputTransformers) {
+                if (transformer == DocumentAsPromptTransformer) {
+                    add(DeepSeekFileTransformer(provider.apiKey.primaryDeepSeekApiKey(), purpose))
+                }
+                add(transformer)
+            }
+        }
     }
 }
 

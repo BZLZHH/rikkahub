@@ -151,6 +151,13 @@ sealed class StreamChunk {
     data class Annotations(val annotations: List<UIMessageAnnotation>) : StreamChunk()
 
     @Serializable
+    @SerialName("deepseek_metadata")
+    data class DeepSeekMetadata(
+        val title: String? = null,
+        val replay: JsonObject? = null,
+    ) : StreamChunk()
+
+    @Serializable
     @SerialName("usage")
     data class Usage(val usage: TokenUsage) : StreamChunk()
 

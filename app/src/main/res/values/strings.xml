@@ -2139,4 +2139,22 @@
   <string name="quick_start_card_desc">RikkaHub needs a model provider to chat. Follow the quick start to set up a provider and default model, or migrate your chat history from DeepSeek.</string>
   <string name="setting_page_quick_start">Quick Start</string>
   <string name="setting_page_quick_start_desc">Set up providers and models step by step, or migrate from DeepSeek</string>
+  <string name="setting_model_page_deepseek_ocr">DeepSeek OCR</string>
+  <string name="setting_model_page_deepseek_ocr_desc">Automatically send images to DeepSeek for text recognition when the chat model cannot read images.</string>
+  <string name="assistant_page_local_tools_deepseek_ocr_desc">Let the assistant send attachments from the latest message to DeepSeek for text recognition. Requires a DeepSeek API key.</string>
+  <string name="setting_provider_page_deepseek_tools">DeepSeek</string>
+  <string name="setting_provider_page_deepseek_tools_desc">Use DeepSeek web tools by default. You can change the search mode in each conversation.</string>
+  <string name="setting_provider_page_deepseek_safety">Safety Check</string>
+  <string name="setting_provider_page_deepseek_safety_desc">Hold the reply until DeepSeek returns a safety verdict.</string>
+  <string name="setting_provider_page_deepseek_title">DeepSeek Conversation Titles</string>
+  <string name="setting_provider_page_deepseek_metadata">Send User Metadata</string>
+  <string name="setting_provider_page_deepseek_metadata_desc">Send the app language, message date, and any location you enter to DeepSeek.</string>
+  <string name="setting_provider_page_deepseek_metadata_responses">The Responses protocol does not support sending this metadata to DeepSeek.</string>
+  <string name="setting_provider_page_deepseek_location">Location (optional)</string>
+  <string name="setting_provider_page_deepseek_files">Attachment Processing</string>
+  <string name="setting_provider_page_deepseek_files_desc">Text and Rich Layout send attachments to DeepSeek for processing.</string>
+  <string name="setting_provider_page_deepseek_files_local">Local</string>
+  <string name="setting_provider_page_deepseek_files_text">Text</string>
+  <string name="setting_provider_page_deepseek_files_layout">Rich Layout</string>
+  <string name="setting_model_page_deepseek_ocr_api_key_desc">Leave blank to use a key from an enabled DeepSeek provider.</string>
 </resources>

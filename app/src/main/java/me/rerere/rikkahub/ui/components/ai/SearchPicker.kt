@@ -52,7 +52,10 @@ import androidx.graphics.shapes.RoundedPolygon
 import androidx.compose.ui.util.fastForEachIndexed
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.deepSeekToolsEnabled
 import me.rerere.ai.provider.supportsBuiltInSearch
+import me.rerere.ai.provider.supportsDeepSeekFlash
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AiSearch02
 import me.rerere.hugeicons.stroke.ArrowLeft01
@@ -76,11 +79,19 @@ enum class SearchMode {
 
 private val modeShapes = SearchMode.entries.map { it.shape() }
 
-internal fun searchModeOf(enableSearch: Boolean, model: Model?): SearchMode = when {
-    // 模型已开启内置搜索（可能是不支持的模型残留的孤儿状态）
-    model?.tools?.contains(BuiltInTools.Search) == true -> SearchMode.BUILT_IN
-    enableSearch -> SearchMode.LOCAL
-    else -> SearchMode.OFF
+internal fun searchModeOf(
+    enableSearch: Boolean,
+    model: Model?,
+    provider: ProviderSetting? = null,
+): SearchMode {
+    val builtIn = if (model == null) false else if (model.deepSeekToolsEnabled &&
+        provider?.supportsDeepSeekFlash(model) == true
+    ) model.deepSeek.webTools else BuiltInTools.Search in model.tools
+    return when {
+        builtIn -> SearchMode.BUILT_IN
+        enableSearch -> SearchMode.LOCAL
+        else -> SearchMode.OFF
+    }
 }
 
 // 加号 sheet 里的联网搜索入口
@@ -93,7 +104,7 @@ internal fun SearchPickerListItem(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val mode = searchModeOf(enableSearch, model)
+    val mode = searchModeOf(enableSearch, model, model?.findProvider(settings.providers))
     val currentService = settings.searchServices.getOrNull(settings.searchServiceSelected)
 
     SegmentedListItem(
@@ -178,8 +189,9 @@ private fun SearchPicker(
     val navBackStack = LocalNavController.current
 
     val provider = model?.findProvider(settings.providers)
-    val supportsBuiltInSearch = provider?.supportsBuiltInSearch == true
-    val currentMode = searchModeOf(enableSearch, model)
+    val supportsBuiltInSearch = provider?.supportsBuiltInSearch == true ||
+        (model?.deepSeekToolsEnabled == true && provider?.supportsDeepSeekFlash(model) == true)
+    val currentMode = searchModeOf(enableSearch, model, provider)
     // 模型支持内置搜索，或已开启内置搜索（后者保证残留状态也能被关闭）时显示模型搜索选项
     val showModelSearch = model != null && (supportsBuiltInSearch || currentMode == SearchMode.BUILT_IN)
     val modes = buildList {

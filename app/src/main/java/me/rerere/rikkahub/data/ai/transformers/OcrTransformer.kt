@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.data.ai.transformers
 
 import android.content.Context
-import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.serializer
@@ -11,6 +11,7 @@ import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.deepseek.deepSeekFileId
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.cache.LruCache
@@ -18,6 +19,10 @@ import me.rerere.common.cache.SingleFileCacheStore
 import me.rerere.rikkahub.data.ai.UsageRecorder
 import me.rerere.rikkahub.data.ai.UsageSource
 import me.rerere.rikkahub.data.ai.UsageTag
+import me.rerere.rikkahub.data.ai.tools.DeepSeekAttachmentService
+import me.rerere.rikkahub.data.ai.tools.resolveDeepSeekOcrApiKey
+import me.rerere.rikkahub.data.ai.tools.toDeepSeekAttachment
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -25,8 +30,6 @@ import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import java.io.File
 import kotlin.time.Duration.Companion.days
-
-private const val TAG = "OcrTransformer"
 
 object OcrTransformer : InputMessageTransformer, KoinComponent {
     private val cache by lazy {
@@ -56,7 +59,7 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         }
 
         val hasImages = messages.any { message ->
-            message.parts.any { it is UIMessagePart.Image && it.url.startsWith("file:") }
+            message.parts.any { it is UIMessagePart.Image && it.url.startsWith("file:") && it.deepSeekFileId == null }
         }
         if (!hasImages) return messages
 
@@ -67,8 +70,8 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
                     message.copy(
                         parts = message.parts.map { part ->
                             when {
-                                part is UIMessagePart.Image && part.url.startsWith("file:") -> {
-                                    UIMessagePart.Text(performOcr(part))
+                                part is UIMessagePart.Image && part.url.startsWith("file:") && part.deepSeekFileId == null -> {
+                                    UIMessagePart.Text(performOcr(part, ctx.settings, ctx.context))
                                 }
 
                                 else -> part
@@ -82,14 +85,44 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         }
     }
 
-    suspend fun performOcr(part: UIMessagePart.Image): String = runCatching {
-        // Check cache first
-        cache.get(part.url)?.let { cachedResult ->
-            Log.i(TAG, "performOcr: Using cached result for ${part.url}")
-            return cachedResult
-        }
+    suspend fun performOcr(part: UIMessagePart.Image): String = withContext(Dispatchers.IO) {
+        performOcr(part, get<SettingsStore>().settingsFlow.value, get<Context>())
+    }
 
-        val settings = get<SettingsStore>().settingsFlow.value
+    private suspend fun performOcr(part: UIMessagePart.Image, settings: Settings, context: Context): String = try {
+        val input = if (settings.deepSeekOcrEnabled) {
+            part.toDeepSeekAttachment(context)?.takeIf { it.supportsOcr }
+        } else {
+            null
+        }
+        if (input != null) {
+            val key = settings.resolveDeepSeekOcrApiKey() ?: error("A DeepSeek OCR API key is required")
+            val cacheKey = "deepseek:" + listOf(
+                key, part.url, input.file.length().toString(), input.file.lastModified().toString(),
+            ).joinToString("\u0000").sha256()
+            cache.get(cacheKey) ?: run {
+                val result = DeepSeekAttachmentService.client.recognize(key, input.file, input.fileName, input.mime)
+                val text = result.pages.sortedBy { it.index }.joinToString("\n\n") { page ->
+                    buildString {
+                        if (result.pages.size > 1) appendLine("[Page ${page.index + 1}]")
+                        append(page.text)
+                        if (page.finishReason == "length") append("\n[OCR output truncated]")
+                    }
+                }
+                check(text.isNotBlank()) { "DeepSeek OCR returned no text" }
+                wrapOcrText(text).also { cache.put(cacheKey, it) }
+            }
+        } else {
+            performModelOcr(part, settings)
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        "[ERROR, OCR failed: ${e.message}]"
+    }
+
+    private suspend fun performModelOcr(part: UIMessagePart.Image, settings: Settings): String {
+        cache.get(part.url)?.let { return it }
         val model = settings.findModelById(settings.ocrModelId) ?: return "[Image]"
         val providerSetting = model.findProvider(settings.providers) ?: return "[Image]"
         val provider = get<UsageRecorder>().wrap(
@@ -112,18 +145,13 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
             ),
         )
         val content = result.message.toText().ifBlank { "[ERROR, OCR failed]" }
-        Log.i(TAG, "performOcr: $content")
-        val ocrResult = """
-            <image_file_ocr>
-               $content
-            </image_file_ocr>
-            * The image_file_ocr tag contains a description of an image that the user uploaded to you, not the user's prompt.
-        """.trimIndent()
-
-        // Cache the result
-        cache.put(part.url, ocrResult)
-        return ocrResult
-    }.getOrElse {
-        "[ERROR, OCR failed: $it]"
+        return wrapOcrText(content).also { cache.put(part.url, it) }
     }
+
+    private fun wrapOcrText(content: String): String = """
+        <image_file_ocr>
+           $content
+        </image_file_ocr>
+        * The image_file_ocr tag contains a description of an image that the user uploaded to you, not the user's prompt.
+    """.trimIndent()
 }

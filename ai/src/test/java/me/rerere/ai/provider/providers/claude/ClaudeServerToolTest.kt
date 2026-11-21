@@ -403,34 +403,10 @@ class ClaudeServerToolTest {
         providerSetting: ProviderSetting.Claude,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-    ): kotlinx.serialization.json.JsonObject {
-        val method = ClaudeProvider::class.java.getDeclaredMethod(
-            "buildMessageRequest",
-            ProviderSetting.Claude::class.java,
-            List::class.java,
-            TextGenerationParams::class.java,
-            Boolean::class.javaPrimitiveType,
-        )
-        method.isAccessible = true
-        return method.invoke(provider, providerSetting, messages, params, false)
-            as kotlinx.serialization.json.JsonObject
-    }
+    ): kotlinx.serialization.json.JsonObject = provider.buildMessageRequest(providerSetting, messages, params)
 
-    private fun buildMessages(messages: List<UIMessage>): JsonArray {
-        val method = ClaudeProvider::class.java.getDeclaredMethod(
-            "buildMessages",
-            List::class.java,
-            Boolean::class.javaPrimitiveType,
-            me.rerere.ai.provider.ClaudePromptCacheTtl::class.java,
-        )
-        method.isAccessible = true
-        return method.invoke(
-            provider,
-            messages,
-            false,
-            me.rerere.ai.provider.ClaudePromptCacheTtl.FIVE_MINUTES,
-        ) as JsonArray
-    }
+    private fun buildMessages(messages: List<UIMessage>): JsonArray =
+        provider.buildMessages(messages, false, me.rerere.ai.provider.ClaudePromptCacheTtl.FIVE_MINUTES)
 
     private fun serverToolUse(
         id: String = "srvtoolu_1",

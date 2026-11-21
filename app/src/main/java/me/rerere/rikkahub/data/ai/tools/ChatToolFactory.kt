@@ -6,13 +6,18 @@ import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.deepSeekToolsEnabled
+import me.rerere.ai.provider.supportsDeepSeekFlash
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.db.dao.WorkspaceJobDAO
 import me.rerere.rikkahub.data.job.JobScheduleEngine
 import me.rerere.rikkahub.data.job.WorkspaceJobManager
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -32,8 +37,14 @@ private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
 // 搜索结果的体积由用户设置的结果数决定，且结果列表 UI 与引用跳转都依赖完整的 JSON 结构，不参与截断
 private val TOOLS_WITHOUT_OUTPUT_TRUNCATION = setOf("search_web")
 
-internal fun shouldUseExternalWebSearch(assistant: Assistant, model: Model): Boolean {
-    return assistant.enableWebSearch && BuiltInTools.Search !in model.tools
+internal fun shouldUseExternalWebSearch(
+    assistant: Assistant,
+    model: Model,
+    provider: ProviderSetting? = null,
+): Boolean {
+    val nativeDeepSeek = provider?.supportsDeepSeekFlash(model) == true && model.deepSeekToolsEnabled
+    val nativeSearch = if (nativeDeepSeek) model.deepSeek.webTools else BuiltInTools.Search in model.tools
+    return assistant.enableWebSearch && !nativeSearch
 }
 
 class InvalidMcpServerNamesException(val names: List<String>) :
@@ -67,6 +78,7 @@ class ChatToolFactory(
         model: Model,
         conversationId: Uuid? = null,
         workspaceCwd: String? = null,
+        latestAttachments: List<UIMessagePart> = emptyList(),
     ): List<Tool> {
         val workspaceTools =
             createWorkspaceToolsIfReady(
@@ -81,10 +93,14 @@ class ChatToolFactory(
             if (assistant.enableMemory) {
                 addAll(buildMemoryTools(memoryRepository, assistant.memoryId))
             }
-            if (shouldUseExternalWebSearch(assistant, model)) {
+            if (shouldUseExternalWebSearch(assistant, model, model.findProvider(settings.providers))) {
                 addAll(createSearchTools(settings))
             }
             addAll(localTools.getTools(assistant.localTools))
+            if (LocalToolOption.DeepSeekOcr in assistant.localTools) {
+                val apiKey = settings.resolveDeepSeekOcrApiKey()
+                if (apiKey != null) buildDeepSeekOcrTool(context, apiKey, latestAttachments)?.let { add(it) }
+            }
             if (assistant.enableRecentChatsReference) {
                 addAll(createConversationTools(conversationRepository, assistant.id))
             }

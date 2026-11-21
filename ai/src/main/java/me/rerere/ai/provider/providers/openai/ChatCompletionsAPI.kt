@@ -37,11 +37,25 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.TextGenerationResult
+import me.rerere.ai.provider.deepseek.deepSeekFileId
 import me.rerere.ai.provider.providers.PartGroup
+import me.rerere.ai.provider.providers.deepseek.DEEPSEEK_REFUSAL
+import me.rerere.ai.provider.providers.deepseek.DeepSeekConversation
+import me.rerere.ai.provider.providers.deepseek.DeepSeekProtocol
+import me.rerere.ai.provider.providers.deepseek.DeepSeekStreamDecoder
+import me.rerere.ai.provider.providers.deepseek.addDeepSeekReplay
+import me.rerere.ai.provider.providers.deepseek.deepSeekConversation
+import me.rerere.ai.provider.providers.deepseek.deepSeekEffort
+import me.rerere.ai.provider.providers.deepseek.hasError
+import me.rerere.ai.provider.providers.deepseek.objectList
+import me.rerere.ai.provider.providers.deepseek.string
+import me.rerere.ai.provider.providers.deepseek.urlCitation
+import me.rerere.ai.provider.providers.deepseek.withoutDeepSeekReplayReasoning
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.OpenRouterReasoningMetadata
+import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
@@ -84,6 +98,7 @@ class ChatCompletionsAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): TextGenerationResult = withContext(Dispatchers.IO) {
+        val deepSeek = providerSetting.deepSeekConversation(DeepSeekProtocol.CHAT_COMPLETIONS, params)
         val requestBody =
             buildChatCompletionRequest(
                 messages = messages,
@@ -95,15 +110,19 @@ class ChatCompletionsAPI(
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
-            )
+            .apply {
+                val primary = deepSeek?.primaryKey
+                if (primary != null) {
+                    header("Authorization", "Bearer $primary")
+                } else {
+                    addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
+                }
+            }
             .configureReferHeaders(providerSetting.baseUrl)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
-        logRequestBody(TAG, "generateText") { json.encodeToString(requestBody) }
+        if (deepSeek == null) logRequestBody(TAG, "generateText") { json.encodeToString(requestBody) }
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
@@ -113,7 +132,11 @@ class ChatCompletionsAPI(
         val bodyStr = response.body?.string() ?: ""
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
-        // 从 JsonObject 中提取必要的信息
+        parseCompletion(bodyJson, deepSeek?.takeIf { it.shouldBuffer(requestBody) })
+    }
+
+    internal fun parseCompletion(bodyJson: JsonObject, deepSeek: DeepSeekConversation?): TextGenerationResult {
+        if (deepSeek != null && bodyJson.hasError()) throw bodyJson.parseErrorDetail()
         val id = bodyJson["id"]?.jsonPrimitive?.contentOrNull ?: ""
         val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: ""
         val choice = bodyJson["choices"]?.jsonArray?.get(0)?.jsonObject ?: error("choices is null")
@@ -125,10 +148,10 @@ class ChatCompletionsAPI(
             ?: "unknown"
         val usage = parseTokenUsage(bodyJson["usage"] as? JsonObject)
 
-        TextGenerationResult(
+        return TextGenerationResult(
             id = id,
             model = model,
-            message = parseMessage(message),
+            message = if (deepSeek == null) parseMessage(message) else parseDeepSeekMessage(message, finishReason, deepSeek),
             finishReason = finishReason,
             usage = usage
         )
@@ -139,6 +162,7 @@ class ChatCompletionsAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<StreamChunk> = callbackFlow {
+        val deepSeek = providerSetting.deepSeekConversation(DeepSeekProtocol.CHAT_COMPLETIONS, params)
         val requestBody = buildChatCompletionRequest(
             messages = messages,
             params = params,
@@ -150,21 +174,27 @@ class ChatCompletionsAPI(
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
-            )
+            .apply {
+                val primary = deepSeek?.primaryKey
+                if (primary != null) {
+                    header("Authorization", "Bearer $primary")
+                } else {
+                    addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
+                }
+            }
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
-        logRequestBody(TAG, "streamText") { json.encodeToString(requestBody) }
+        if (deepSeek == null) logRequestBody(TAG, "streamText") { json.encodeToString(requestBody) }
 
         // just for debugging response body
         // println(client.newCall(request).await().body?.string())
 
-        val decoder = ChatCompletionsStreamDecoder()
+        val nativeResponse = deepSeek?.takeIf { it.shouldBuffer(requestBody) }
+        val decoder = nativeResponse?.let { DeepSeekStreamDecoder(it.protocol) { body -> parseCompletion(body, it) } }
+            ?: ChatCompletionsStreamDecoder()
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
@@ -181,7 +211,7 @@ class ChatCompletionsAPI(
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: $data")
+                if (nativeResponse == null) Log.d(TAG, "onEvent: $data")
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
@@ -215,8 +245,12 @@ class ChatCompletionsAPI(
             }
 
             override fun onClosed(eventSource: EventSource) {
-                sendChunks(decoder.onClosed())
-                close()
+                try {
+                    sendChunks(decoder.onClosed())
+                    close()
+                } catch (e: Throwable) {
+                    close(e)
+                }
             }
         }
 
@@ -229,7 +263,7 @@ class ChatCompletionsAPI(
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED).flowOn(Dispatchers.IO)
 
-    private fun buildChatCompletionRequest(
+    internal fun buildChatCompletionRequest(
         messages: List<UIMessage>,
         params: TextGenerationParams,
         providerSetting: ProviderSetting.OpenAI,
@@ -237,6 +271,7 @@ class ChatCompletionsAPI(
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val isOpenRouter = host == "openrouter.ai"
+        val deepSeek = providerSetting.deepSeekConversation(DeepSeekProtocol.CHAT_COMPLETIONS, params)
         return buildJsonObject {
             put("model", params.model.modelId)
             put(
@@ -250,6 +285,7 @@ class ChatCompletionsAPI(
                         else -> ReasoningReplayFormat.REASONING_CONTENT
                     },
                     supportInputModalities = params.model.inputModalities,
+                    deepSeek = deepSeek,
                 )
             )
 
@@ -279,7 +315,7 @@ class ChatCompletionsAPI(
                 }
             }
 
-            if (params.model.abilities.contains(ModelAbility.REASONING)) {
+            if (deepSeek != null || params.model.abilities.contains(ModelAbility.REASONING)) {
                 val level = params.reasoningLevel
                 when (host) {
                     "openrouter.ai" -> {
@@ -387,7 +423,7 @@ class ChatCompletionsAPI(
                             put("type", if (!level.isEnabled) "disabled" else "enabled")
                         })
                         if (level.isEnabled && level != ReasoningLevel.AUTO) {
-                            val effort = when (level) {
+                            val effort = if (deepSeek != null) level.deepSeekEffort() else when (level) {
                                 ReasoningLevel.MEDIUM, ReasoningLevel.HIGH -> "high"
                                 ReasoningLevel.MAX -> "max"
                                 else -> level.effort
@@ -447,7 +483,10 @@ class ChatCompletionsAPI(
                     }
                 }
             }
-        }.mergeCustomBody(params.customBody)
+        }.let { defaultBody ->
+            val merged = defaultBody.mergeCustomBody(params.customBody)
+            deepSeek?.enforceExtensions(merged, defaultBody) ?: merged
+        }
     }
 
     private fun isModelAllowTemperature(model: Model): Boolean {
@@ -460,24 +499,34 @@ class ChatCompletionsAPI(
             !isMoonshotRestricted
     }
 
-    private fun buildMessages(
+    internal fun buildMessages(
         messages: List<UIMessage>,
         includeHistoryReasoning: Boolean = true,
         reasoningReplayFormat: ReasoningReplayFormat = ReasoningReplayFormat.REASONING_CONTENT,
         supportInputModalities: List<Modality> = listOf(Modality.TEXT, Modality.IMAGE),
+        deepSeek: DeepSeekConversation? = null,
     ) = buildJsonArray {
-        val filteredMessages = messages.filter { it.isValidToUpload() }
+        val filteredMessages = messages.filter { it.isValidToUpload() || !deepSeek?.payloads(it).isNullOrEmpty() }
 
         filteredMessages.forEach { message ->
             if (message.role == MessageRole.ASSISTANT) {
+                if (deepSeek != null && addDeepSeekReplay(
+                        payloads = deepSeek.payloads(message).filterIsInstance<JsonObject>(),
+                        message = message,
+                        calls = { payload -> (payload as JsonObject).objectList("tool_calls").mapNotNull { it.string("id") } },
+                        appendPayload = { add(it) },
+                        appendResults = { tools -> tools.forEach { addToolResult(it, supportInputModalities) } },
+                    )
+                ) return@forEach
                 addAssistantMessages(
-                    message = message,
+                    message = message.withoutDeepSeekReplayReasoning(),
                     includeReasoning = includeHistoryReasoning,
                     reasoningReplayFormat = reasoningReplayFormat,
                     supportInputModalities = supportInputModalities,
                 )
             } else {
-                addNonAssistantMessage(message)
+                if (message.role == MessageRole.USER) deepSeek?.reminder(message)?.let { add(it) }
+                addNonAssistantMessage(message, deepSeek != null)
             }
         }
     }
@@ -520,13 +569,7 @@ class ChatCompletionsAPI(
                     reasoningPart = null // 清空，下一个 group 可能有新的 reasoning
 
                     // 紧跟 tool 结果消息
-                    group.tools.forEach { tool ->
-                        add(buildJsonObject {
-                            put("role", "tool")
-                            put("tool_call_id", tool.toolCallId)
-                            put("content", tool.toToolResultContent(supportInputModalities))
-                        })
-                    }
+                    group.tools.forEach { addToolResult(it, supportInputModalities) }
                 }
             }
         }
@@ -655,15 +698,32 @@ class ChatCompletionsAPI(
         }
     }
 
-    private fun JsonArrayBuilder.addNonAssistantMessage(message: UIMessage) {
+    private fun JsonArrayBuilder.addToolResult(tool: UIMessagePart.Tool, supportInputModalities: List<Modality>) {
+        add(buildJsonObject {
+            put("role", "tool")
+            put("tool_call_id", tool.toolCallId)
+            put("content", tool.toToolResultContent(supportInputModalities))
+        })
+    }
+
+    private fun JsonArrayBuilder.addNonAssistantMessage(message: UIMessage, deepSeek: Boolean) {
         add(buildJsonObject {
             put("role", JsonPrimitive(message.role.name.lowercase()))
 
-            if (message.parts.isOnlyTextPart()) {
+            val nativeFiles = deepSeek && message.role == MessageRole.USER
+            if (message.parts.isOnlyTextPart() && (!nativeFiles || message.parts.none { it.deepSeekFileId != null })) {
                 put("content", message.parts.filterIsInstance<UIMessagePart.Text>().first().text)
             } else {
                 putJsonArray("content") {
                     message.parts.forEach { part ->
+                        val fileId = part.deepSeekFileId.takeIf { nativeFiles }
+                        if (fileId != null) {
+                            add(buildJsonObject {
+                                put("type", "file")
+                                put("file_id", fileId)
+                            })
+                            return@forEach
+                        }
                         when (part) {
                             is UIMessagePart.Text -> {
                                 add(buildJsonObject {
@@ -740,6 +800,61 @@ class ChatCompletionsAPI(
                 }
             }
         }
+    }
+
+    private fun parseDeepSeekMessage(
+        rawMessage: JsonObject,
+        finishReason: String,
+        deepSeek: DeepSeekConversation,
+    ): UIMessage {
+        val refused = finishReason == "content_filter"
+        val steps = rawMessage.objectList("server_tool_calls")
+        val payload = buildJsonObject {
+            put("role", "assistant")
+            rawMessage.forEach { (key, value) ->
+                if (key !in setOf("role", "title", "refusal") && !refused) put(key, value)
+            }
+            if (refused) {
+                put("content", "")
+                if (steps.isNotEmpty()) put("server_tool_calls", JsonArray(steps.map { step ->
+                    if ("reasoning_content" in step) JsonObject(step + ("reasoning_content" to JsonPrimitive("")))
+                    else step
+                }))
+            }
+        }
+        val base = if (refused) {
+            UIMessage(role = MessageRole.ASSISTANT, parts = listOf(UIMessagePart.Text(DEEPSEEK_REFUSAL)))
+        } else {
+            parseMessage(JsonObject(rawMessage - "annotations")).copy(
+                annotations = rawMessage.objectList("annotations").mapNotNull { annotation ->
+                    (annotation["url_citation"] as? JsonObject)?.urlCitation() ?: annotation.urlCitation()
+                }.distinct(),
+            )
+        }
+        val parts = buildList {
+            steps.forEach { step ->
+                if (!refused) step.string("reasoning_content")?.takeIf { it.isNotEmpty() }?.let {
+                    add(UIMessagePart.Reasoning(it))
+                }
+                step.objectList("calls").forEach { call ->
+                    val id = call.string("id") ?: return@forEach
+                    add(UIMessagePart.ServerTool(
+                        toolCallId = id,
+                        toolName = call.string("type") ?: "deepseek_web_search",
+                        input = call["action"],
+                        output = call["sources"] ?: call["page"] ?: call["error"],
+                        status = when (call.string("status")) {
+                            "completed" -> ServerToolStatus.COMPLETED
+                            else -> ServerToolStatus.FAILED
+                        },
+                        metadata = call["kind"]?.let { JsonObject(mapOf("kind" to it)) },
+                    ))
+                }
+            }
+            addAll(base.parts.filterNot { it is UIMessagePart.Tool })
+            addAll(base.parts.filterIsInstance<UIMessagePart.Tool>())
+        }
+        return deepSeek.bind(base.copy(parts = parts), payload, rawMessage.string("title").takeUnless { refused })
     }
 
     private fun parseMessage(jsonObject: JsonObject): UIMessage {

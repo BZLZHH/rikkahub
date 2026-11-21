@@ -315,6 +315,10 @@ class StreamChunkHandler(private val model: Model? = null) {
             is StreamChunk.ImageEnd -> this.also { imagePartIndexes.remove(chunk.id) }
             is StreamChunk.Annotations -> copy(annotations = (annotations + chunk.annotations).distinct())
             is StreamChunk.Usage -> copy(usage = usage.merge(chunk.usage))
+            is StreamChunk.DeepSeekMetadata -> copy(
+                deepSeekTitle = deepSeekTitle ?: chunk.title,
+                deepSeekReplay = deepSeekReplay + listOfNotNull(chunk.replay),
+            )
             is StreamChunk.Finish -> copy(
                 finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
             ).finishReasoning().also {
@@ -460,5 +464,7 @@ private fun UIMessage.appendMessage(delta: UIMessage): UIMessage {
     return copy(
         parts = newParts,
         annotations = delta.annotations.ifEmpty { annotations },
+        deepSeekTitle = deepSeekTitle ?: delta.deepSeekTitle,
+        deepSeekReplay = deepSeekReplay + delta.deepSeekReplay,
     )
 }

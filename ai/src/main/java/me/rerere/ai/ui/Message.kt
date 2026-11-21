@@ -5,6 +5,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlinx.serialization.json.JsonObject
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.Model
@@ -34,6 +35,8 @@ data class UIMessage(
     // 这条消息累计请求了多少次模型（多轮工具调用共用同一条消息）
     val stepCount: Int? = null,
     val translation: String? = null,
+    val deepSeekTitle: String? = null,
+    val deepSeekReplay: List<JsonObject> = emptyList(),
     // 压缩检查点：此消息是它之前全部历史的摘要，组装请求时从最后一个检查点开始取
     val isContextCheckpoint: Boolean = false,
     // 请求期间生成的内部消息；该标记仅在内存中使用

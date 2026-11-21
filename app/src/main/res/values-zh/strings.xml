@@ -2143,4 +2143,22 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="quick_start_card_desc">RikkaHub 需要接入模型服务商才能聊天。跟着快速入门配置提供商和默认模型，也可以从 DeepSeek 迁移聊天记录。</string>
   <string name="setting_page_quick_start">快速入门</string>
   <string name="setting_page_quick_start_desc">一步步配置提供商和模型，或从 DeepSeek 迁移</string>
+  <string name="setting_model_page_deepseek_ocr">DeepSeek OCR</string>
+  <string name="setting_model_page_deepseek_ocr_desc">聊天模型不支持图片时，自动将图片发送到 DeepSeek 识别文字。</string>
+  <string name="assistant_page_local_tools_deepseek_ocr_desc">允许助手将最新消息中的附件发送到 DeepSeek 识别文字。需要 DeepSeek API 密钥。</string>
+  <string name="setting_provider_page_deepseek_tools">DeepSeek</string>
+  <string name="setting_provider_page_deepseek_tools_desc">默认使用 DeepSeek 联网工具，可在各对话中切换搜索模式。</string>
+  <string name="setting_provider_page_deepseek_safety">安全检查</string>
+  <string name="setting_provider_page_deepseek_safety_desc">在 DeepSeek 返回安全检查结果前暂不显示回复。</string>
+  <string name="setting_provider_page_deepseek_title">DeepSeek 生成对话标题</string>
+  <string name="setting_provider_page_deepseek_metadata">发送用户信息</string>
+  <string name="setting_provider_page_deepseek_metadata_desc">将应用语言、消息日期和你手动填写的位置发送到 DeepSeek。</string>
+  <string name="setting_provider_page_deepseek_metadata_responses">Responses 协议不支持将这些用户信息发送给 DeepSeek。</string>
+  <string name="setting_provider_page_deepseek_location">位置（选填）</string>
+  <string name="setting_provider_page_deepseek_files">附件处理</string>
+  <string name="setting_provider_page_deepseek_files_desc">选择文字识别或版面识别会将附件上传到 DeepSeek 处理。</string>
+  <string name="setting_provider_page_deepseek_files_local">本地</string>
+  <string name="setting_provider_page_deepseek_files_text">文字识别</string>
+  <string name="setting_provider_page_deepseek_files_layout">版面识别</string>
+  <string name="setting_model_page_deepseek_ocr_api_key_desc">留空时使用已启用的 DeepSeek 提供商的密钥。</string>
 </resources>

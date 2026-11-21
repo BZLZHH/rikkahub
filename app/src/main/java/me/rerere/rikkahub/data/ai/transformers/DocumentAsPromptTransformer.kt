@@ -4,6 +4,7 @@ import androidx.core.net.toFile
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import me.rerere.ai.provider.deepseek.deepSeekFileId
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.document.DocxParser
@@ -21,7 +22,7 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
             messages.map { message ->
                 message.copy(
                     parts = message.parts.toMutableList().apply {
-                        val documents = filterIsInstance<UIMessagePart.Document>()
+                        val documents = filterIsInstance<UIMessagePart.Document>().filter { it.deepSeekFileId == null }
                         if (documents.isNotEmpty()) {
                             documents.forEach { document ->
                                 val content = readDocumentContent(document)

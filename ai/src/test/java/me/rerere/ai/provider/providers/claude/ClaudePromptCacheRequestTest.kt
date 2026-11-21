@@ -32,18 +32,8 @@ class ClaudePromptCacheRequestTest {
         providerSetting: ProviderSetting.Claude,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-        stream: Boolean = false
-    ): JsonObject {
-        val method = ClaudeProvider::class.java.getDeclaredMethod(
-            "buildMessageRequest",
-            ProviderSetting.Claude::class.java,
-            List::class.java,
-            TextGenerationParams::class.java,
-            Boolean::class.javaPrimitiveType!!
-        )
-        method.isAccessible = true
-        return method.invoke(provider, providerSetting, messages, params, stream) as JsonObject
-    }
+        stream: Boolean = false,
+    ): JsonObject = provider.buildMessageRequest(providerSetting, messages, params, stream)
 
     private fun dummyTool(): Tool {
         return Tool(

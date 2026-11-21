@@ -5,10 +5,15 @@ import androidx.datastore.preferences.core.mutablePreferencesOf
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.descriptors.elementNames
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.DeepSeekFileInput
+import me.rerere.ai.provider.DeepSeekModelOptions
+import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.mediagen.provider.MediaGenerationProviderSetting
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
@@ -60,6 +65,8 @@ class SettingsFieldsTest {
         assertEquals(1.5f, stored["default_tts_playback_speed"])
         assertEquals(0.9f, stored["auto_compress_threshold"])
         assertEquals("title", stored["title_prompt"])
+        assertEquals(true, stored["deepseek_ocr_enabled"])
+        assertEquals("test-ocr-api-key", stored["deepseek_ocr_api_key"])
         assertEquals("00000000-0000-0000-0000-000000000001", stored["chat_model"])
         assertEquals("LOW", stored["fast_model_reasoning_level"])
         assertEquals("""[{"id":"00000000-0000-0000-0000-000000000007","name":"tag"}]""", stored["assistant_tags"])
@@ -79,6 +86,8 @@ class SettingsFieldsTest {
         assertEquals(null, settings.selectedASRProviderId)
         assertEquals(null, settings.memoryModelId)
         assertEquals(true, settings.dynamicColor)
+        assertFalse(settings.deepSeekOcrEnabled)
+        assertEquals("", settings.deepSeekOcrApiKey)
         assertEquals(8080, settings.webServerPort)
     }
 
@@ -168,11 +177,35 @@ private val SAMPLE = Settings(
     suggestionPrompt = "suggestion",
     ocrModelId = id(5),
     ocrPrompt = "ocr",
+    deepSeekOcrEnabled = true,
+    deepSeekOcrApiKey = "test-ocr-api-key",
     enableAutoCompress = false,
     autoCompressThreshold = 0.9f,
     assistantId = id(20),
-    providers = listOf(ProviderSetting.OpenAI(id = id(31), name = "Provider")),
-    assistants = listOf(Assistant(id = id(20), name = "Assistant")),
+    providers = listOf(
+        ProviderSetting.OpenAI(
+            id = id(31),
+            name = "Provider",
+            baseUrl = "https://api.deepseek.com",
+            models = listOf(
+                Model(
+                    modelId = "deepseek-v4-flash",
+                    id = id(32),
+                    tools = setOf(BuiltInTools.DeepSeek),
+                    deepSeek = DeepSeekModelOptions(
+                        safetyCheck = false,
+                        conversationTitle = false,
+                        userMetadata = true,
+                        location = "Shanghai",
+                        fileInput = DeepSeekFileInput.RICH_LAYOUT,
+                    ),
+                ),
+            ),
+        ),
+    ),
+    assistants = listOf(
+        Assistant(id = id(20), name = "Assistant", localTools = listOf(LocalToolOption.DeepSeekOcr)),
+    ),
     assistantTags = listOf(Tag(id = id(7), name = "tag")),
     searchServices = listOf(
         SearchServiceOptions.BingLocalOptions(id = id(21)),
@@ -234,6 +267,8 @@ private val STORED_KEYS = setOf(
     "suggestion_prompt",
     "ocr_model",
     "ocr_prompt",
+    "deepseek_ocr_enabled",
+    "deepseek_ocr_api_key",
     "enable_auto_compress",
     "auto_compress_threshold",
     "providers",

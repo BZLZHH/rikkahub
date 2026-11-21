@@ -41,17 +41,8 @@ class ClaudeRequestMessageTest {
         provider = ClaudeProvider(OkHttpClient())
     }
 
-    // Helper to invoke private buildMessages method via reflection
-    private fun invokeBuildMessages(messages: List<UIMessage>): JsonArray {
-        val method = ClaudeProvider::class.java.getDeclaredMethod(
-            "buildMessages",
-            List::class.java,
-            Boolean::class.javaPrimitiveType,
-            ClaudePromptCacheTtl::class.java
-        )
-        method.isAccessible = true
-        return method.invoke(provider, messages, false, ClaudePromptCacheTtl.FIVE_MINUTES) as JsonArray
-    }
+    private fun invokeBuildMessages(messages: List<UIMessage>): JsonArray =
+        provider.buildMessages(messages, false, ClaudePromptCacheTtl.FIVE_MINUTES)
 
     @Test
     fun `multi-round tool calls should produce tool_use followed by tool_result`() {

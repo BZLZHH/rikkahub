@@ -32,6 +32,7 @@ import me.rerere.hugeicons.stroke.ClipboardPaste
 import me.rerere.hugeicons.stroke.Clock01
 import me.rerere.hugeicons.stroke.JavaScript
 import me.rerere.hugeicons.stroke.MessageQuestion
+import me.rerere.hugeicons.stroke.ScanText
 import me.rerere.hugeicons.stroke.SmartPhone01
 import me.rerere.hugeicons.stroke.Tap01
 import me.rerere.hugeicons.stroke.VolumeHigh
@@ -261,6 +262,12 @@ private fun AssistantLocalToolContent(
                 icon = HugeIcons.ChartLineData01,
                 title = R.string.assistant_page_local_tools_chart_display_title,
                 description = R.string.assistant_page_local_tools_chart_display_desc,
+            )
+            toolItem(
+                option = LocalToolOption.DeepSeekOcr,
+                icon = HugeIcons.ScanText,
+                title = R.string.setting_model_page_deepseek_ocr,
+                description = R.string.assistant_page_local_tools_deepseek_ocr_desc,
             )
             // 只有 github 渠道的 Android 11 及以上才有
             if (PhoneUseManager.isSupported) {

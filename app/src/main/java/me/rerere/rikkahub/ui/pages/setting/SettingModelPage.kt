@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -22,6 +24,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.ModelType
@@ -262,6 +266,32 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
                     iconContainerColor = containerColor,
                     iconContentColor = contentColor,
                 )
+            }
+        }
+        item {
+            CardGroup {
+                switchItem(
+                    checked = settings.deepSeekOcrEnabled,
+                    onCheckedChange = { enabled ->
+                        vm.updateSettings { latest -> latest.copy(deepSeekOcrEnabled = enabled) }
+                    },
+                    supportingContent = { Text(stringResource(R.string.setting_model_page_deepseek_ocr_desc)) },
+                    headlineContent = { Text(stringResource(R.string.setting_model_page_deepseek_ocr)) },
+                )
+                formItem {
+                    OutlinedTextField(
+                        value = settings.deepSeekOcrApiKey,
+                        onValueChange = { apiKey ->
+                            vm.updateSettings { latest -> latest.copy(deepSeekOcrApiKey = apiKey) }
+                        },
+                        label = { Text(stringResource(R.string.setting_provider_page_api_key)) },
+                        supportingText = { Text(stringResource(R.string.setting_model_page_deepseek_ocr_api_key_desc)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                }
             }
         }
     }

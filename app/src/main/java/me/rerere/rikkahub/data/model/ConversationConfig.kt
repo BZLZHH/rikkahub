@@ -26,6 +26,7 @@ data class ConversationConfig(
     val mcpServers: Set<Uuid> = emptySet(),
     val workspaceId: Uuid? = null,
     val enabledSkills: Set<String> = emptySet(),
+    val deepSeekWebTools: Boolean? = null,
 )
 
 // 内置搜索是模型的开关，不在助手上，由调用方另行填入
@@ -65,6 +66,7 @@ fun Conversation.withAssistantUpdate(updated: Assistant, settings: Settings): Co
     } else {
         copy(
             config = updated.toConversationConfig().copy(
+                deepSeekWebTools = config.deepSeekWebTools.takeIf { updated.chatModelId == config.chatModelId },
                 builtInSearch = if (updated.chatModelId == config.chatModelId) {
                     config.builtInSearch
                 } else {
@@ -115,7 +117,8 @@ fun Settings.getChatModelOf(conversation: Conversation): Model? {
     // 固定的模型被删除后退回助手当前的模型，内置搜索也跟随该模型自身的开关
     val model = findModelById(config.chatModelId) ?: return assistantModel
     return model.copy(
-        tools = if (config.builtInSearch) model.tools + BuiltInTools.Search else model.tools - BuiltInTools.Search
+        tools = if (config.builtInSearch) model.tools + BuiltInTools.Search else model.tools - BuiltInTools.Search,
+        deepSeek = model.deepSeek.copy(webTools = config.deepSeekWebTools ?: model.deepSeek.webTools),
     )
 }
 
@@ -129,7 +132,7 @@ fun Conversation.bindConfig(settings: Settings): Conversation {
     val config = config
     if (config != null) {
         if (model == null || model.id == config.chatModelId) return this
-        return copy(config = config.copy(chatModelId = model.id, builtInSearch = builtInSearch))
+        return copy(config = config.copy(chatModelId = model.id, builtInSearch = builtInSearch, deepSeekWebTools = null))
     }
     val assistant = settings.getAssistantOf(this)
     return copy(

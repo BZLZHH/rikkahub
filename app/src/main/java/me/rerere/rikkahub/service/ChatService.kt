@@ -32,6 +32,8 @@ import me.rerere.ai.agent.RetryAttempt
 import me.rerere.ai.agent.runAgent
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.deepSeekToolsEnabled
+import me.rerere.ai.provider.supportsDeepSeekFlash
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.ui.ToolApprovalState
@@ -51,6 +53,7 @@ import me.rerere.rikkahub.data.ai.prompts.buildCompressPrompt
 import me.rerere.rikkahub.data.ai.tools.InvalidMcpServerNamesException
 import me.rerere.rikkahub.data.ai.tools.shouldUseExternalWebSearch
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -747,7 +750,7 @@ class ChatService(
             // 中途压缩把检查点插在回复之后；重新生成较早的消息时后面还有别的节点，不压缩
             val canCompress = regenerateNodeId == null || conversation.messageNodes.lastOrNull()?.id == regenerateNodeId
 
-            val turn = requestFactory.createContext(settings, conversation)
+            val turn = requestFactory.createContext(settings, conversation, target.history)
             senderName = if (turn.assistant.useAssistantAvatar) {
                 turn.assistant.name.ifEmpty { context.getString(R.string.assistant_page_default_assistant) }
             } else {
@@ -755,6 +758,8 @@ class ChatService(
             }
             warnIfToolsUnavailable(turn, conversationId)
 
+            val titleIncarnation = session.incarnation
+            var nativeTitle: String? = null
             var finishReason: AgentFinishReason? = null
             // 上一段是压缩后新开的；摘要加系统提示词本身就超过阈值时再压也没用，这一轮不再压缩
             var afterCompression = false
@@ -806,6 +811,7 @@ class ChatService(
                                 session.replyMessageId.value = event.message.id
                                 Log.i(TAG, "runTurn: finished (${event.reason})")
                                 finishReason = event.reason
+                                nativeTitle = nativeTitle ?: event.message.deepSeekTitle?.trim()?.takeIf { it.isNotEmpty() }
                             }
                         }
                     }
@@ -836,7 +842,16 @@ class ChatService(
             val reason = checkNotNull(finishReason)
             // 等待审批时这一轮还没结束，标题、建议和记忆整理等审批之后再做
             if (reason !is AgentFinishReason.AwaitingApproval) {
-                sessionManager.launchWithSession(conversationId) { generateTitle(conversationId) }
+                val title = nativeTitle?.takeIf { turn.requestDeepSeekTitle }
+                if (title != null) {
+                    session.updateMetadata(
+                        transform = { if (it.title.isBlank()) it.copy(title = title) else it },
+                        persist = { conversationRepo.updateTitle(conversationId, it.title) },
+                        expectedIncarnation = titleIncarnation,
+                    )
+                } else {
+                    sessionManager.launchWithSession(conversationId) { generateTitle(conversationId) }
+                }
                 sessionManager.launchWithSession(conversationId) { generateSuggestion(conversationId) }
                 if (turn.assistant.enableMemory) memoryConsolidationScheduler.onTurnFinished(session.state.value)
             }
@@ -868,7 +883,7 @@ class ChatService(
     // 模型不支持工具调用时，搜索和 MCP 工具都不会生效，提醒一下
     private fun warnIfToolsUnavailable(turn: ChatTurnContext, conversationId: Uuid) {
         if (ModelAbility.TOOL in turn.model.abilities) return
-        if (shouldUseExternalWebSearch(turn.assistant, turn.model) ||
+        if (shouldUseExternalWebSearch(turn.assistant, turn.model, turn.providerSetting) ||
             mcpManager.getAllAvailableTools(turn.assistant).isNotEmpty()
         ) {
             addError(
@@ -1212,6 +1227,10 @@ class ChatService(
         withLoadedSession(conversationId) { session ->
             val conversation = session.state.value
             if (conversation.config != null) {
+                val settings = settingsStore.awaitLoaded()
+                val isNativeDeepSeek = settings.getChatModelOf(conversation)?.let { model ->
+                    model.deepSeekToolsEnabled && model.findProvider(settings.providers)?.supportsDeepSeekFlash(model) == true
+                } == true
                 session.updateMetadata(
                     transform = {
                         it.copy(
@@ -1219,6 +1238,7 @@ class ChatService(
                                 config.copy(
                                     enableWebSearch = enableWebSearch ?: config.enableWebSearch,
                                     builtInSearch = builtInSearch ?: config.builtInSearch,
+                                    deepSeekWebTools = if (isNativeDeepSeek) builtInSearch ?: config.deepSeekWebTools else config.deepSeekWebTools,
                                 )
                             }
                         )
@@ -1248,7 +1268,10 @@ class ChatService(
                                         model.tools + BuiltInTools.Search
                                     } else {
                                         model.tools - BuiltInTools.Search
-                                    }
+                                    },
+                                    deepSeek = if (model.deepSeekToolsEnabled &&
+                                        model.findProvider(settings.providers)?.supportsDeepSeekFlash(model) == true
+                                    ) model.deepSeek.copy(webTools = builtInSearch) else model.deepSeek,
                                 )
                             )
                         }

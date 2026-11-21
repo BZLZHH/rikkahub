@@ -84,6 +84,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.DeepSeekFileInput
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -91,7 +92,9 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.deepSeekToolsEnabled
 import me.rerere.ai.provider.filterByKeywords
+import me.rerere.ai.provider.supportsDeepSeekFlash
 import me.rerere.ai.provider.supportsQuota
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
@@ -133,6 +136,7 @@ import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.cardGroupItemShape
 import me.rerere.rikkahub.ui.components.ui.longPressReorder
 import me.rerere.rikkahub.ui.components.ui.rememberShareSheetState
+import me.rerere.rikkahub.ui.components.ui.switchItem
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useEditState
@@ -723,10 +727,9 @@ private fun ModelSettingsForm(
                 ModelFormTab.BUILT_IN_TOOLS -> {
                     // 内置工具页面
                     BuiltInToolsSettings(
-                        tools = model.tools,
-                        onUpdateTools = { tools ->
-                            onModelChange(model.copy(tools = tools))
-                        }
+                        model = model,
+                        provider = model.providerOverwrite ?: parentProvider,
+                        onModelChange = onModelChange,
                     )
                 }
             }
@@ -1446,9 +1449,11 @@ private fun ModelCard(
 
 @Composable
 private fun BuiltInToolsSettings(
-    tools: Set<BuiltInTools>,
-    onUpdateTools: (Set<BuiltInTools>) -> Unit
+    model: Model,
+    provider: ProviderSetting?,
+    onModelChange: (Model) -> Unit,
 ) {
+    val tools = model.tools
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1489,7 +1494,7 @@ private fun BuiltInToolsSettings(
                 val (title, description) = info
                 val checked = tool in tools
                 val toggle = { enabled: Boolean ->
-                    onUpdateTools(if (enabled) tools + tool else tools - tool)
+                    onModelChange(model.copy(tools = if (enabled) tools + tool else tools - tool))
                 }
                 item(
                     onClick = { toggle(!checked) },
@@ -1498,6 +1503,90 @@ private fun BuiltInToolsSettings(
                     trailingContent = { Switch(checked = checked, onCheckedChange = toggle) },
                     headlineContent = { Text(title) },
                 )
+            }
+        }
+
+        if (provider?.supportsDeepSeekFlash(model) == true) {
+            DeepSeekToolsSettings(
+                model = model,
+                usesResponses = provider is ProviderSetting.OpenAI && provider.useResponseApi,
+                onModelChange = onModelChange,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DeepSeekToolsSettings(
+    model: Model,
+    usesResponses: Boolean,
+    onModelChange: (Model) -> Unit,
+) {
+    val enabled = model.deepSeekToolsEnabled
+    val options = model.deepSeek
+    CardGroup {
+        switchItem(
+            checked = enabled,
+            onCheckedChange = { checked ->
+                val tools = if (checked) model.tools + BuiltInTools.DeepSeek else model.tools - BuiltInTools.DeepSeek
+                onModelChange(model.copy(tools = tools))
+            },
+            headlineContent = { Text(stringResource(R.string.setting_provider_page_deepseek_tools)) },
+            supportingContent = { Text(stringResource(R.string.setting_provider_page_deepseek_tools_desc)) },
+        )
+        if (enabled) {
+            switchItem(
+                checked = options.safetyCheck,
+                onCheckedChange = { onModelChange(model.copy(deepSeek = options.copy(safetyCheck = it))) },
+                headlineContent = { Text(stringResource(R.string.setting_provider_page_deepseek_safety)) },
+                supportingContent = { Text(stringResource(R.string.setting_provider_page_deepseek_safety_desc)) },
+            )
+            switchItem(
+                checked = options.conversationTitle,
+                onCheckedChange = { onModelChange(model.copy(deepSeek = options.copy(conversationTitle = it))) },
+                headlineContent = { Text(stringResource(R.string.setting_provider_page_deepseek_title)) },
+            )
+            switchItem(
+                checked = options.userMetadata && !usesResponses,
+                onCheckedChange = { onModelChange(model.copy(deepSeek = options.copy(userMetadata = it))) },
+                enabled = !usesResponses,
+                headlineContent = { Text(stringResource(R.string.setting_provider_page_deepseek_metadata)) },
+                supportingContent = {
+                    val description = if (usesResponses) {
+                        R.string.setting_provider_page_deepseek_metadata_responses
+                    } else {
+                        R.string.setting_provider_page_deepseek_metadata_desc
+                    }
+                    Text(stringResource(description))
+                },
+            )
+            if (options.userMetadata && !usesResponses) {
+                formItem {
+                    OutlinedTextField(
+                        value = options.location,
+                        onValueChange = { onModelChange(model.copy(deepSeek = options.copy(location = it))) },
+                        label = { Text(stringResource(R.string.setting_provider_page_deepseek_location)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                }
+            }
+            formItem(
+                headlineContent = { Text(stringResource(R.string.setting_provider_page_deepseek_files)) },
+                supportingContent = { Text(stringResource(R.string.setting_provider_page_deepseek_files_desc)) },
+            ) {
+                ConnectedChoiceButtons(
+                    options = DeepSeekFileInput.entries,
+                    selected = options.fileInput,
+                    onSelect = { onModelChange(model.copy(deepSeek = options.copy(fileInput = it))) },
+                ) { option, selected ->
+                    val label = when (option) {
+                        DeepSeekFileInput.LOCAL -> R.string.setting_provider_page_deepseek_files_local
+                        DeepSeekFileInput.TEXT -> R.string.setting_provider_page_deepseek_files_text
+                        DeepSeekFileInput.RICH_LAYOUT -> R.string.setting_provider_page_deepseek_files_layout
+                    }
+                    ConnectedChoiceLabel(text = stringResource(label), selected = selected)
+                }
             }
         }
     }

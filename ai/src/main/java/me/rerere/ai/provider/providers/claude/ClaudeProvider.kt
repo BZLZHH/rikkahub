@@ -44,7 +44,23 @@ import me.rerere.ai.provider.ProviderQuota
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.TextGenerationResult
+import me.rerere.ai.provider.deepseek.deepSeekFileId
 import me.rerere.ai.provider.providers.PartGroup
+import me.rerere.ai.provider.providers.deepseek.DEEPSEEK_FILES_BETA
+import me.rerere.ai.provider.providers.deepseek.DEEPSEEK_READ_URL
+import me.rerere.ai.provider.providers.deepseek.DEEPSEEK_REFUSAL
+import me.rerere.ai.provider.providers.deepseek.DEEPSEEK_WEB_SEARCH
+import me.rerere.ai.provider.providers.deepseek.DeepSeekConversation
+import me.rerere.ai.provider.providers.deepseek.DeepSeekProtocol
+import me.rerere.ai.provider.providers.deepseek.DeepSeekStreamDecoder
+import me.rerere.ai.provider.providers.deepseek.addDeepSeekReplay
+import me.rerere.ai.provider.providers.deepseek.deepSeekConversation
+import me.rerere.ai.provider.providers.deepseek.deepSeekEffort
+import me.rerere.ai.provider.providers.deepseek.hasError
+import me.rerere.ai.provider.providers.deepseek.objectList
+import me.rerere.ai.provider.providers.deepseek.string
+import me.rerere.ai.provider.providers.deepseek.urlCitation
+import me.rerere.ai.provider.providers.deepseek.withoutDeepSeekReplayReasoning
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.provider.runQuotaQuery
 import me.rerere.ai.provider.stream.SseEvent
@@ -295,18 +311,28 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): TextGenerationResult {
+        val deepSeek = providerSetting.deepSeekConversation(DeepSeekProtocol.MESSAGES, params)
         val requestBody = buildMessageRequest(providerSetting, messages, params)
+        val headers = providerSetting.mergeCustomHeaders(params.customHeaders)
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/messages")
-            .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
+            .url(providerSetting.messagesUrl(deepSeek))
+            .headers(headers)
+            .configureDeepSeekFiles(requestBody, deepSeek, headers.values("anthropic-beta"))
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
+            .apply {
+                val primary = deepSeek?.primaryKey
+                if (primary != null) {
+                    header("x-api-key", primary)
+                } else {
+                    addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
+                }
+            }
             .addHeader("anthropic-version", ANTHROPIC_VERSION)
             .configureReferHeaders(providerSetting.baseUrl)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
-        logRequestBody(TAG, "generateText") { json.encodeToString(requestBody) }
+        if (deepSeek == null) logRequestBody(TAG, "generateText") { json.encodeToString(requestBody) }
 
         val response = client.newCall(request).await()
         if (!response.isSuccessful) {
@@ -316,17 +342,49 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         val bodyStr = response.body?.string() ?: ""
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
-        // 从 JsonObject 中提取必要的信息
+        return parseMessageResponse(bodyJson, deepSeek?.takeIf { it.shouldBuffer(requestBody) })
+    }
+
+    internal fun parseMessageResponse(bodyJson: JsonObject, deepSeek: DeepSeekConversation?): TextGenerationResult {
+        if (deepSeek != null && (bodyJson.hasError() || bodyJson.string("type") == "error")) {
+            throw bodyJson.parseErrorDetail()
+        }
         val id = bodyJson["id"]?.jsonPrimitive?.contentOrNull ?: ""
         val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: ""
         val content = bodyJson["content"]?.jsonArray ?: JsonArray(emptyList())
         val stopReason = bodyJson["stop_reason"]?.jsonPrimitive?.contentOrNull ?: "unknown"
         val usage = parseTokenUsage(bodyJson)
+        val message = if (deepSeek == null) parseMessage(content) else {
+            val refused = stopReason == "refusal"
+            val nativeContent = if (refused) JsonArray(content.filter { element ->
+                val block = element as? JsonObject
+                block?.string("type").let { it.isClaudeServerToolUseType() || it.isClaudeServerToolResultType() }
+            }) else content
+            val parsed = parseMessage(nativeContent)
+            val parts = parsed.parts.map { part ->
+                if (part is UIMessagePart.ServerTool) {
+                    val raw = part.metadataAs<ServerToolMetadata>()
+                    val kind = raw?.call?.get("kind") ?: raw?.result?.get("kind")
+                    part.copy(metadata = kind?.let { JsonObject(mapOf("kind" to it)) })
+                } else part
+            }
+            val annotations = nativeContent.filterIsInstance<JsonObject>().flatMap { block ->
+                block.objectList("citations").mapNotNull { it.urlCitation() }
+            }.distinct()
+            deepSeek.bind(
+                parsed.copy(
+                    parts = if (refused) parts + UIMessagePart.Text(DEEPSEEK_REFUSAL) else parts,
+                    annotations = annotations,
+                ),
+                nativeContent,
+                bodyJson.string("title").takeUnless { refused },
+            )
+        }
 
         return TextGenerationResult(
             id = id,
             model = model,
-            message = parseMessage(content),
+            message = message,
             finishReason = stopReason,
             usage = usage
         )
@@ -345,26 +403,40 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<StreamChunk> = callbackFlow {
+        val deepSeek = providerSetting.deepSeekConversation(DeepSeekProtocol.MESSAGES, params)
         val requestBody = buildMessageRequest(providerSetting, messages, params, stream = true)
+        val headers = providerSetting.mergeCustomHeaders(params.customHeaders)
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/messages")
-            .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
+            .url(providerSetting.messagesUrl(deepSeek))
+            .headers(headers)
+            .configureDeepSeekFiles(requestBody, deepSeek, headers.values("anthropic-beta"))
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
+            .apply {
+                val primary = deepSeek?.primaryKey
+                if (primary != null) {
+                    header("x-api-key", primary)
+                } else {
+                    addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
+                }
+            }
             .addHeader("anthropic-version", ANTHROPIC_VERSION)
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
-        logRequestBody(TAG, "streamText") { json.encodeToString(requestBody) }
-
-        // 整个请求体那一行会被 logcat 截断，再逐条打印一遍消息
-        requestBody["messages"]!!.jsonArray.forEach { message ->
-            logRequestBody(TAG, "streamText") { message.toString() }
+        if (deepSeek == null) {
+            logRequestBody(TAG, "streamText") { json.encodeToString(requestBody) }
+            // 整个请求体那一行会被 logcat 截断，再逐条打印一遍消息
+            requestBody["messages"]!!.jsonArray.forEach { message ->
+                logRequestBody(TAG, "streamText") { message.toString() }
+            }
         }
 
-        val decoder = ClaudeStreamDecoder()
+        val nativeResponse = deepSeek?.takeIf { it.shouldBuffer(requestBody) }
+        val decoder = nativeResponse?.let {
+            DeepSeekStreamDecoder(it.protocol) { body -> parseMessageResponse(body, it) }
+        } ?: ClaudeStreamDecoder()
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
@@ -381,7 +453,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: type=$type, data=$data")
+                if (nativeResponse == null) Log.d(TAG, "onEvent: type=$type, data=$data")
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
@@ -413,8 +485,12 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             }
 
             override fun onClosed(eventSource: EventSource) {
-                sendChunks(decoder.onClosed())
-                close()
+                try {
+                    sendChunks(decoder.onClosed())
+                    close()
+                } catch (e: Throwable) {
+                    close(e)
+                }
             }
         }
 
@@ -427,22 +503,24 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED).flowOn(Dispatchers.IO)
 
-    private fun buildMessageRequest(
+    internal fun buildMessageRequest(
         providerSetting: ProviderSetting.Claude,
         messages: List<UIMessage>,
         params: TextGenerationParams,
         stream: Boolean = false
     ): JsonObject {
+        val deepSeek = providerSetting.deepSeekConversation(DeepSeekProtocol.MESSAGES, params)
+        val promptCaching = providerSetting.promptCaching && deepSeek == null
         return buildJsonObject {
             put("model", params.model.modelId)
             put(
                 "messages",
-                buildMessages(messages, providerSetting.promptCaching, providerSetting.promptCacheTtl)
+                buildMessages(messages, promptCaching, providerSetting.promptCacheTtl, deepSeek)
             )
             put("max_tokens", params.maxTokens ?: 64_000)
 
             // 顶层 cache_control: 让 Anthropic 自动管理缓存断点
-            if (providerSetting.promptCaching) {
+            if (promptCaching) {
                 put("cache_control", cacheControlEphemeral(providerSetting.promptCacheTtl))
             }
 
@@ -465,7 +543,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         add(buildJsonObject {
                             put("type", "text")
                             put("text", part.text)
-                            if (providerSetting.promptCaching && index == systemTextParts.lastIndex) {
+                            if (promptCaching && index == systemTextParts.lastIndex) {
                                 put("cache_control", cacheControlEphemeral(providerSetting.promptCacheTtl))
                             }
                         })
@@ -476,7 +554,13 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             // 处理 thinking
             // Anthropic 新 API: adaptive 模式 + output_config.effort 控制强度
             // 旧的 type=enabled + budget_tokens 在 Opus 4.7+ 上已不支持
-            if (params.model.abilities.contains(ModelAbility.REASONING)) {
+            if (deepSeek != null) {
+                val level = params.reasoningLevel
+                put("thinking", buildJsonObject { put("type", if (level.isEnabled) "enabled" else "disabled") })
+                if (level.isEnabled && level != ReasoningLevel.AUTO) {
+                    put("output_config", buildJsonObject { put("effort", level.deepSeekEffort()) })
+                }
+            } else if (params.model.abilities.contains(ModelAbility.REASONING)) {
                 when (params.reasoningLevel) {
                     ReasoningLevel.OFF -> {
                         put("thinking", buildJsonObject { put("type", "disabled") })
@@ -522,6 +606,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         })
                         BuiltInTools.UrlContext,
                         BuiltInTools.ImageGeneration,
+                        BuiltInTools.DeepSeek,
                         -> Unit
                     }
                 }
@@ -529,7 +614,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             if (toolDefinitions.isNotEmpty()) {
                 putJsonArray("tools") {
                     toolDefinitions.forEachIndexed { index, definition ->
-                        if (providerSetting.promptCaching && index == toolDefinitions.lastIndex) {
+                        if (promptCaching && index == toolDefinitions.lastIndex) {
                             add(JsonObject(
                                 definition + mapOf(
                                     "cache_control" to cacheControlEphemeral(providerSetting.promptCacheTtl)
@@ -541,7 +626,10 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     }
                 }
             }
-        }.mergeCustomBody(params.customBody)
+        }.let { defaultBody ->
+            val merged = defaultBody.mergeCustomBody(params.customBody)
+            deepSeek?.enforceExtensions(merged, defaultBody) ?: merged
+        }
     }
 
     private fun cacheControlEphemeral(promptCacheTtl: ClaudePromptCacheTtl) = buildJsonObject {
@@ -549,18 +637,30 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         promptCacheTtl.apiValue?.let { put("ttl", it) }
     }
 
-    private fun buildMessages(
+    internal fun buildMessages(
         messages: List<UIMessage>,
         promptCaching: Boolean,
-        promptCacheTtl: ClaudePromptCacheTtl
+        promptCacheTtl: ClaudePromptCacheTtl,
+        deepSeek: DeepSeekConversation? = null,
     ) = buildJsonArray {
         messages
-            .filter { it.isValidToUpload() && it.role != MessageRole.SYSTEM }
+            .filter { it.role != MessageRole.SYSTEM &&
+                (it.isValidToUpload() || !deepSeek?.payloads(it).isNullOrEmpty()) }
             .forEach { message ->
                 if (message.role == MessageRole.ASSISTANT) {
-                    addAssistantMessage(message)
+                    if (deepSeek != null && addDeepSeekReplay(
+                            payloads = deepSeek.payloads(message).filterIsInstance<JsonArray>(),
+                            message = message,
+                            calls = { payload -> (payload as JsonArray).filterIsInstance<JsonObject>()
+                                .filter { it.string("type") == "tool_use" }.mapNotNull { it.string("id") } },
+                            appendPayload = { addAssistantContent(it as JsonArray) },
+                            appendResults = { addToolResults(it) },
+                        )
+                    ) return@forEach
+                    addAssistantMessage(message.withoutDeepSeekReplayReasoning())
                 } else {
-                    addUserMessage(message)
+                    if (message.role == MessageRole.USER) deepSeek?.reminder(message)?.let { add(it) }
+                    addUserMessage(message, deepSeek != null)
                 }
             }
     }.let { messagesArray ->
@@ -639,12 +739,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     contentBuffer.clear()
 
                     // 紧跟 tool_result
-                    add(buildJsonObject {
-                        put("role", "user")
-                        putJsonArray("content") {
-                            group.tools.forEach { add(it.toToolResultBlock()) }
-                        }
-                    })
+                    addToolResults(group.tools)
                 }
             }
         }
@@ -658,11 +753,39 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
-    private fun JsonArrayBuilder.addUserMessage(message: UIMessage) {
+    private fun JsonArrayBuilder.addAssistantContent(content: JsonArray) {
+        if (content.isEmpty()) return
+        add(buildJsonObject {
+            put("role", "assistant")
+            put("content", content)
+        })
+    }
+
+    private fun JsonArrayBuilder.addToolResults(tools: List<UIMessagePart.Tool>) {
+        add(buildJsonObject {
+            put("role", "user")
+            put("content", JsonArray(tools.map { it.toToolResultBlock() }))
+        })
+    }
+
+    private fun JsonArrayBuilder.addUserMessage(message: UIMessage, deepSeek: Boolean) {
         add(buildJsonObject {
             put("role", message.role.name.lowercase())
             putJsonArray("content") {
-                message.parts.flatMap { it.toContentBlocks() }.forEach { add(it) }
+                message.parts.forEach { part ->
+                    val fileId = part.deepSeekFileId.takeIf { deepSeek && message.role == MessageRole.USER }
+                    if (fileId == null) {
+                        part.toContentBlocks().forEach { add(it) }
+                    } else {
+                        add(buildJsonObject {
+                            put("type", if (part is UIMessagePart.Image) "image" else "document")
+                            put("source", buildJsonObject {
+                                put("type", "file")
+                                put("file_id", fileId)
+                            })
+                        })
+                    }
+                }
             }
         })
     }
@@ -710,6 +833,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
     }
 
     private fun UIMessagePart.ServerTool.serverToolContentBlocks(): List<JsonObject> {
+        if (toolName == DEEPSEEK_WEB_SEARCH || toolName == DEEPSEEK_READ_URL) return emptyList()
         val metadata = metadataAs<ServerToolMetadata>()
         val protocol = metadata?.protocol
         if (protocol != null && protocol != ServerToolProtocol.ANTHROPIC_MESSAGES) return emptyList()
@@ -944,7 +1068,33 @@ internal fun String?.isClaudeServerToolResultType(): Boolean =
 internal fun String?.isClaudeServerToolUseType(): Boolean =
     this == "server_tool_use" || (this != null && this != "tool_use" && endsWith("_tool_use"))
 
-internal fun JsonElement?.isClaudeServerToolError(): Boolean {
-    val content = this as? JsonObject ?: return false
-    return content["type"]?.jsonPrimitive?.contentOrNull?.endsWith("_error") == true
+internal fun JsonElement?.isClaudeServerToolError(): Boolean = when (this) {
+    is JsonObject -> string("type")?.endsWith("_error") == true
+    is JsonArray -> any { it.isClaudeServerToolError() }
+    else -> false
+}
+
+private fun ProviderSetting.Claude.messagesUrl(deepSeek: DeepSeekConversation?): String {
+    if (deepSeek == null) return "$baseUrl/messages"
+    return when (val base = baseUrl.trimEnd('/')) {
+        "https://api.deepseek.com" -> "$base/anthropic/v1/messages"
+        "https://api.deepseek.com/anthropic" -> "$base/v1/messages"
+        else -> "$base/messages"
+    }
+}
+
+private fun Request.Builder.configureDeepSeekFiles(
+    body: JsonObject,
+    deepSeek: DeepSeekConversation?,
+    existingBetas: List<String>,
+): Request.Builder = apply {
+    if (deepSeek == null) return@apply
+    val hasNativeFile = body.objectList("messages").any { message ->
+        message.objectList("content").any { (it["source"] as? JsonObject)?.string("type") == "file" }
+    }
+    if (hasNativeFile) {
+        val betas = (existingBetas.flatMap { it.split(',') }.map(String::trim) + DEEPSEEK_FILES_BETA)
+            .filter(String::isNotEmpty).distinct()
+        header("anthropic-beta", betas.joinToString(","))
+    }
 }

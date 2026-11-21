@@ -49,6 +49,7 @@ object PermissionNormalizer {
         tool == "workflow_kill" -> setOf(ToolEffect.PROC_CONTROL)
         tool.startsWith("mcp__") -> setOf(ToolEffect.EXTERNAL)
         tool == "search_web" || tool == "scrape_web" -> setOf(ToolEffect.NET)
+        tool == "deepseek_ocr" -> setOf(ToolEffect.FS_READ, ToolEffect.NET, ToolEffect.EXTERNAL)
         tool == "ask_user" -> setOf(ToolEffect.HUMAN)
         tool in setOf("calendar_create", "clipboard_tool", "text_to_speech", "phone_use") -> setOf(ToolEffect.DEVICE)
         tool == "eval_javascript" -> setOf(ToolEffect.PROC_EXEC)
@@ -301,6 +302,7 @@ object PermissionNormalizer {
         "ask_user" -> "向你提问"
         "search_web" -> "联网搜索"
         "scrape_web" -> "抓取网页"
+        "deepseek_ocr" -> "将本轮附件发送给 DeepSeek 进行 OCR"
         "conversation_search" -> "检索历史会话"
         "recent_chats" -> "参考历史会话"
         "memory_tool" -> "读写记忆（旧工具）"

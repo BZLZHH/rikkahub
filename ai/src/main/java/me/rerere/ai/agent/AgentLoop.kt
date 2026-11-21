@@ -165,6 +165,8 @@ internal class AgentLoop(
         val generated = base.copy(
             parts = base.parts + result.message.parts,
             annotations = result.message.annotations.ifEmpty { base.annotations },
+            deepSeekTitle = base.deepSeekTitle ?: result.message.deepSeekTitle,
+            deepSeekReplay = base.deepSeekReplay + result.message.deepSeekReplay,
             modelId = params.model.id,
             usage = result.usage,
         ).finishReasoning().withStepStats(base, requestTime)

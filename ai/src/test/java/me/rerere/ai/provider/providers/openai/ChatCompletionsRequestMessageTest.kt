@@ -38,28 +38,16 @@ class ChatCompletionsRequestMessageTest {
         api = ChatCompletionsAPI(OkHttpClient(), KeyRoulette.default())
     }
 
-    // Helper to invoke private buildMessages method via reflection
     private fun invokeBuildMessages(
         messages: List<UIMessage>,
         includeHistoryReasoning: Boolean = true,
         reasoningReplayFormat: ReasoningReplayFormat = ReasoningReplayFormat.REASONING_CONTENT,
-    ): JsonArray {
-        val method = ChatCompletionsAPI::class.java.getDeclaredMethod(
-            "buildMessages",
-            List::class.java,
-            Boolean::class.javaPrimitiveType,
-            ReasoningReplayFormat::class.java,
-            List::class.java
-        )
-        method.isAccessible = true
-        return method.invoke(
-            api,
-            messages,
-            includeHistoryReasoning,
-            reasoningReplayFormat,
-            listOf(Modality.TEXT, Modality.IMAGE)
-        ) as JsonArray
-    }
+    ): JsonArray = api.buildMessages(
+        messages,
+        includeHistoryReasoning,
+        reasoningReplayFormat,
+        listOf(Modality.TEXT, Modality.IMAGE),
+    )
 
     private fun invokeParseMessage(message: JsonObject): UIMessage {
         val method = ChatCompletionsAPI::class.java.getDeclaredMethod(

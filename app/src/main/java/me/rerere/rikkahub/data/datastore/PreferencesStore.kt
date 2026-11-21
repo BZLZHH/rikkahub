@@ -129,6 +129,8 @@ class SettingsStore internal constructor(
         val SUGGESTION_PROMPT = stringPreferencesKey("suggestion_prompt")
         val OCR_MODEL = stringPreferencesKey("ocr_model")
         val OCR_PROMPT = stringPreferencesKey("ocr_prompt")
+        val DEEPSEEK_OCR_ENABLED = booleanPreferencesKey("deepseek_ocr_enabled")
+        val DEEPSEEK_OCR_API_KEY = stringPreferencesKey("deepseek_ocr_api_key")
 
         // 自动压缩
         val ENABLE_AUTO_COMPRESS = booleanPreferencesKey("enable_auto_compress")

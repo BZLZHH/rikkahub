@@ -36,7 +36,22 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.TextGenerationResult
+import me.rerere.ai.provider.deepseek.deepSeekFileId
 import me.rerere.ai.provider.providers.PartGroup
+import me.rerere.ai.provider.providers.deepseek.DEEPSEEK_READ_URL
+import me.rerere.ai.provider.providers.deepseek.DEEPSEEK_REFUSAL
+import me.rerere.ai.provider.providers.deepseek.DEEPSEEK_WEB_SEARCH
+import me.rerere.ai.provider.providers.deepseek.DeepSeekConversation
+import me.rerere.ai.provider.providers.deepseek.DeepSeekProtocol
+import me.rerere.ai.provider.providers.deepseek.DeepSeekStreamDecoder
+import me.rerere.ai.provider.providers.deepseek.addDeepSeekReplay
+import me.rerere.ai.provider.providers.deepseek.deepSeekConversation
+import me.rerere.ai.provider.providers.deepseek.deepSeekEffort
+import me.rerere.ai.provider.providers.deepseek.hasError
+import me.rerere.ai.provider.providers.deepseek.objectList
+import me.rerere.ai.provider.providers.deepseek.string
+import me.rerere.ai.provider.providers.deepseek.urlCitation
+import me.rerere.ai.provider.providers.deepseek.withoutDeepSeekReplayReasoning
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.registry.ModelRegistry
@@ -84,6 +99,7 @@ private const val TAG = "ResponseAPI"
 internal class ResponsesEndpoint(
     val url: String,
     val capabilities: ResponseProviderCapabilities = ResponseProviderCapabilities(),
+    val deepSeek: DeepSeekConversation? = null,
     // 构建请求时调用，负责请求头和鉴权；可挂起，以便先刷新 token
     val configureRequest: suspend Request.Builder.() -> Unit,
 )
@@ -104,16 +120,31 @@ class ResponseAPI(
         params: TextGenerationParams
     ): Flow<StreamChunk> = streamText(providerSetting.toResponsesEndpoint(params), messages, params)
 
-    private fun ProviderSetting.OpenAI.toResponsesEndpoint(params: TextGenerationParams) = ResponsesEndpoint(
-        url = "$baseUrl$responsesPath",
-        capabilities = resolveResponseProviderCapabilities(baseUrl.toHttpUrl().host),
-        configureRequest = {
-            headers(mergeCustomHeaders(params.customHeaders))
-            addHeader("Authorization", "Bearer ${keyRoulette.next(apiKey, id.toString())}")
-            configureReferHeaders(baseUrl)
-            configureSessionHeaders(baseUrl, params.sessionId)
-        },
-    )
+    private fun ProviderSetting.OpenAI.toResponsesEndpoint(params: TextGenerationParams): ResponsesEndpoint {
+        val deepSeek = deepSeekConversation(DeepSeekProtocol.RESPONSES, params)
+        return ResponsesEndpoint(
+            url = if (deepSeek?.primaryKey != null && responsesPath == "/responses" &&
+                baseUrl.toHttpUrl().encodedPath.trimEnd('/') in setOf("", "/v1")
+            ) {
+                "https://api.deepseek.com/responses"
+            } else {
+                "$baseUrl$responsesPath"
+            },
+            capabilities = resolveResponseProviderCapabilities(baseUrl.toHttpUrl().host),
+            deepSeek = deepSeek,
+            configureRequest = {
+                headers(mergeCustomHeaders(params.customHeaders))
+                val primary = deepSeek?.primaryKey
+                if (primary != null) {
+                    header("Authorization", "Bearer $primary")
+                } else {
+                    addHeader("Authorization", "Bearer ${keyRoulette.next(apiKey, id.toString())}")
+                }
+                configureReferHeaders(baseUrl)
+                configureSessionHeaders(baseUrl, params.sessionId)
+            },
+        )
+    }
 
     internal suspend fun generateText(
         endpoint: ResponsesEndpoint,
@@ -122,6 +153,7 @@ class ResponseAPI(
     ): TextGenerationResult = withContext(Dispatchers.IO) {
         val requestBody = buildRequestBody(
             capabilities = endpoint.capabilities,
+            deepSeek = endpoint.deepSeek,
             messages = messages,
             params = params,
             stream = false,
@@ -133,7 +165,7 @@ class ResponseAPI(
             .addHeader("Content-Type", "application/json")
             .build()
 
-        logRequestBody(TAG, "generateText") { json.encodeToString(requestBody) }
+        if (endpoint.deepSeek == null) logRequestBody(TAG, "generateText") { json.encodeToString(requestBody) }
 
         // await() waits for the response headers; reading the body can still block.
         client.newCall(request).await().use { response ->
@@ -142,9 +174,10 @@ class ResponseAPI(
             }
 
             val bodyStr = response.body.string()
-            Log.i(TAG, "generateText: $bodyStr")
+            val nativeResponse = endpoint.deepSeek?.takeIf { it.shouldBuffer(requestBody) }
+            if (nativeResponse == null) Log.i(TAG, "generateText: $bodyStr")
             val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-            parseResponseOutput(bodyJson)
+            parseResponseOutput(bodyJson, nativeResponse)
         }
     }
 
@@ -155,6 +188,7 @@ class ResponseAPI(
     ): Flow<StreamChunk> = callbackFlow {
         val requestBody = buildRequestBody(
             capabilities = endpoint.capabilities,
+            deepSeek = endpoint.deepSeek,
             messages = messages,
             params = params,
             stream = true,
@@ -165,9 +199,12 @@ class ResponseAPI(
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .build()
 
-        logRequestBody(TAG, "streamText") { json.encodeToString(requestBody) }
+        if (endpoint.deepSeek == null) logRequestBody(TAG, "streamText") { json.encodeToString(requestBody) }
 
-        val decoder = ResponseApiStreamDecoder()
+        val nativeResponse = endpoint.deepSeek?.takeIf { it.shouldBuffer(requestBody) }
+        val decoder = nativeResponse?.let {
+            DeepSeekStreamDecoder(it.protocol) { body -> parseResponseOutput(body, it) }
+        } ?: ResponseApiStreamDecoder()
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
@@ -184,7 +221,7 @@ class ResponseAPI(
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: $id/$type $data")
+                if (nativeResponse == null) Log.d(TAG, "onEvent: $id/$type $data")
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
@@ -217,8 +254,12 @@ class ResponseAPI(
             }
 
             override fun onClosed(eventSource: EventSource) {
-                sendChunks(decoder.onClosed())
-                close()
+                try {
+                    sendChunks(decoder.onClosed())
+                    close()
+                } catch (e: Throwable) {
+                    close(e)
+                }
             }
         }
 
@@ -235,7 +276,8 @@ class ResponseAPI(
         capabilities: ResponseProviderCapabilities,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-        stream: Boolean
+        stream: Boolean,
+        deepSeek: DeepSeekConversation? = null,
     ): JsonObject {
         return buildJsonObject {
             put("model", params.model.modelId)
@@ -264,12 +306,14 @@ class ResponseAPI(
                         put("content", systemPrompt)
                     })
                 }
-                buildMessages(messages).forEach { add(it) }
+                buildMessages(messages, deepSeek).forEach { add(it) }
             }
 
             // reasoning
             val reasoningModel = params.model.abilities.contains(ModelAbility.REASONING)
-            if (reasoningModel) {
+            if (deepSeek != null) {
+                put("reasoning", buildJsonObject { put("effort", params.reasoningLevel.deepSeekEffort()) })
+            } else if (reasoningModel) {
                 val reasoning = buildJsonObject {
                     if (capabilities.supportsReasoningSummary) {
                         put("summary", "auto")
@@ -278,7 +322,7 @@ class ResponseAPI(
                 }
                 if (reasoning.isNotEmpty()) put("reasoning", reasoning)
             }
-            if (capabilities.supportEncryptedContent &&
+            if (deepSeek == null && capabilities.supportEncryptedContent &&
                 (reasoningModel || capabilities.alwaysIncludeEncryptedContent)) {
                 put("include", buildJsonArray {
                     add("reasoning.encrypted_content")
@@ -315,6 +359,7 @@ class ResponseAPI(
                     // built-in tools
                     params.model.tools.forEach { builtInTool ->
                         when (builtInTool) {
+                            BuiltInTools.DeepSeek -> Unit
                             BuiltInTools.Search -> {
                                 add(buildJsonObject {
                                     put("type", "web_search")
@@ -333,14 +378,17 @@ class ResponseAPI(
                     }
                 }
             }
-        }.mergeCustomBody(params.customBody)
+        }.let { defaultBody ->
+            val merged = defaultBody.mergeCustomBody(params.customBody)
+            deepSeek?.enforceExtensions(merged, defaultBody) ?: merged
+        }
     }
 
-    internal fun buildMessages(messages: List<UIMessage>) = buildJsonArray {
+    internal fun buildMessages(messages: List<UIMessage>, deepSeek: DeepSeekConversation? = null) = buildJsonArray {
         messages
             .filter { message ->
                 message.role != MessageRole.SYSTEM && (
-                    message.isValidToUpload() || message.parts.any { part ->
+                    message.isValidToUpload() || !deepSeek?.payloads(message).isNullOrEmpty() || message.parts.any { part ->
                         part is UIMessagePart.Reasoning &&
                             part.metadataAs<OpenAIReasoningMetadata>()?.encryptedContent != null
                     }
@@ -348,9 +396,18 @@ class ResponseAPI(
             }
             .forEach { message ->
                 if (message.role == MessageRole.ASSISTANT) {
-                    addAssistantItems(message)
+                    if (deepSeek != null && addDeepSeekReplay(
+                            payloads = deepSeek.payloads(message).filterIsInstance<JsonArray>(),
+                            message = message,
+                            calls = { payload -> (payload as JsonArray).filterIsInstance<JsonObject>()
+                                .filter { it.string("type") == "function_call" }.mapNotNull { it.string("call_id") } },
+                            appendPayload = { (it as JsonArray).forEach { item -> add(item) } },
+                            appendResults = { tools -> tools.forEach { addFunctionOutput(it) } },
+                        )
+                    ) return@forEach
+                    addAssistantItems(message.withoutDeepSeekReplayReasoning())
                 } else {
-                    addUserItems(message)
+                    addUserItems(message, deepSeek != null)
                 }
             }
     }
@@ -460,42 +517,7 @@ class ResponseAPI(
                             put("arguments", tool.inputAsJson().toString())
                         })
                     }
-                    group.tools.forEach { tool ->
-                        add(buildJsonObject {
-                            put("type", "function_call_output")
-                            put("call_id", tool.toolCallId)
-                            val hasImage = tool.output.any { it is UIMessagePart.Image }
-                            if (hasImage) {
-                                putJsonArray("output") {
-                                    tool.output.forEach { part ->
-                                        when (part) {
-                                            is UIMessagePart.Image -> add(buildJsonObject {
-                                                part.encodeBase64().onSuccess { encoded ->
-                                                    put("type", "input_image")
-                                                    put("image_url", encoded.base64)
-                                                }.onFailure {
-                                                    it.printStackTrace()
-                                                    put("type", "input_text")
-                                                    put("text", "Error: Failed to encode image to base64")
-                                                }
-                                            })
-                                            is UIMessagePart.Text -> add(buildJsonObject {
-                                                put("type", "input_text")
-                                                put("text", part.text)
-                                            })
-                                            else -> {}
-                                        }
-                                    }
-                                }
-                            } else {
-                                put(
-                                    "output",
-                                    tool.output.filterIsInstance<UIMessagePart.Text>()
-                                        .joinToString("\n") { it.text }
-                                )
-                            }
-                        })
-                    }
+                    group.tools.forEach { tool -> addFunctionOutput(tool) }
                 }
             }
         }
@@ -506,7 +528,45 @@ class ResponseAPI(
         }
     }
 
+    private fun JsonArrayBuilder.addFunctionOutput(tool: UIMessagePart.Tool) {
+        add(buildJsonObject {
+            put("type", "function_call_output")
+            put("call_id", tool.toolCallId)
+            val hasImage = tool.output.any { it is UIMessagePart.Image }
+            if (hasImage) {
+                putJsonArray("output") {
+                    tool.output.forEach { part ->
+                        when (part) {
+                            is UIMessagePart.Image -> add(buildJsonObject {
+                                part.encodeBase64().onSuccess { encoded ->
+                                    put("type", "input_image")
+                                    put("image_url", encoded.base64)
+                                }.onFailure {
+                                    it.printStackTrace()
+                                    put("type", "input_text")
+                                    put("text", "Error: Failed to encode image to base64")
+                                }
+                            })
+                            is UIMessagePart.Text -> add(buildJsonObject {
+                                put("type", "input_text")
+                                put("text", part.text)
+                            })
+                            else -> {}
+                        }
+                    }
+                }
+            } else {
+                put(
+                    "output",
+                    tool.output.filterIsInstance<UIMessagePart.Text>()
+                        .joinToString("\n") { it.text }
+                )
+            }
+        })
+    }
+
     private fun JsonArrayBuilder.addServerToolItem(tool: UIMessagePart.ServerTool) {
+        if (tool.toolName == DEEPSEEK_WEB_SEARCH || tool.toolName == DEEPSEEK_READ_URL) return
         val metadata = tool.metadataAs<ServerToolMetadata>()
         val protocol = metadata?.protocol
         if (protocol != null && protocol != ServerToolProtocol.OPENAI_RESPONSES) return
@@ -534,24 +594,39 @@ class ResponseAPI(
         })
     }
 
-    private fun JsonArrayBuilder.addUserItems(message: UIMessage) {
-        val contentParts = message.parts.filter { it is UIMessagePart.Text || it is UIMessagePart.Image }
+    private fun JsonArrayBuilder.addUserItems(message: UIMessage, deepSeek: Boolean) {
+        val contentParts = message.parts.filter {
+            it is UIMessagePart.Text || it is UIMessagePart.Image || (deepSeek && it.deepSeekFileId != null)
+        }
         if (contentParts.isNotEmpty()) {
-            addContentItem(message.role, contentParts)
+            addContentItem(message.role, contentParts, deepSeek)
         }
     }
 
-    private fun JsonArrayBuilder.addContentItem(role: MessageRole, parts: List<UIMessagePart>) {
+    private fun JsonArrayBuilder.addContentItem(
+        role: MessageRole,
+        parts: List<UIMessagePart>,
+        deepSeek: Boolean = false,
+    ) {
         if (parts.isEmpty()) return
 
         add(buildJsonObject {
             put("role", JsonPrimitive(role.name.lowercase()))
 
-            if (parts.isOnlyTextPart()) {
+            val nativeFiles = deepSeek && role == MessageRole.USER
+            if (parts.isOnlyTextPart() && (!nativeFiles || parts.none { it.deepSeekFileId != null })) {
                 put("content", (parts.first() as UIMessagePart.Text).text)
             } else {
                 putJsonArray("content") {
                     parts.forEach { part ->
+                        val fileId = part.deepSeekFileId.takeIf { nativeFiles }
+                        if (fileId != null) {
+                            add(buildJsonObject {
+                                put("type", if (part is UIMessagePart.Image) "input_image" else "input_file")
+                                put("file_id", fileId)
+                            })
+                            return@forEach
+                        }
                         when (part) {
                             is UIMessagePart.Text -> {
                                 add(buildJsonObject {
@@ -581,10 +656,17 @@ class ResponseAPI(
         })
     }
 
-    internal fun parseResponseOutput(jsonObject: JsonObject): TextGenerationResult {
-        println(jsonObject)
-        val outputs = jsonObject["output"]?.jsonArray ?: error("output not found")
+    internal fun parseResponseOutput(jsonObject: JsonObject, deepSeek: DeepSeekConversation? = null): TextGenerationResult {
+        val status = jsonObject.string("status")
+        if (deepSeek != null && (jsonObject.hasError() || status == "failed")) throw jsonObject.parseErrorDetail()
+        val refused = deepSeek != null && status == "incomplete" &&
+            (jsonObject["incomplete_details"] as? JsonObject)?.string("reason") == "content_filter"
+        val rawOutputs = jsonObject["output"] as? JsonArray ?: error("output not found")
+        val outputs = if (refused) JsonArray(rawOutputs.filter {
+            (it as? JsonObject)?.string("type") == "web_search_call"
+        }) else rawOutputs
         val parts = arrayListOf<UIMessagePart>()
+        val annotations = mutableListOf<me.rerere.ai.ui.UIMessageAnnotation.UrlCitation>()
 
         outputs.forEach { outputItem ->
             val output = outputItem.jsonObject
@@ -676,27 +758,36 @@ class ResponseAPI(
                                         text = text
                                     )
                                 )
+                                if (deepSeek != null) annotations += part.objectList("annotations")
+                                    .mapNotNull { it.urlCitation() }
                             }
 
-                            else -> error("unknown part type $partType")
+                            else -> if (deepSeek == null) error("unknown part type $partType")
                         }
                     }
                 }
 
                 else -> if (isOpenAIServerToolCall(type)) {
-                    parts.add(output.toOpenAIServerTool())
+                    val tool = output.toOpenAIServerTool()
+                    parts.add(if (deepSeek != null && type == "web_search_call") {
+                        val action = output["action"] as? JsonObject
+                        tool.copy(
+                            toolName = if (output.string("kind") == "read_link") DEEPSEEK_READ_URL else DEEPSEEK_WEB_SEARCH,
+                            output = action?.get("sources") ?: output["page"] ?: output["error"],
+                            metadata = output["kind"]?.let { JsonObject(mapOf("kind" to it)) },
+                        )
+                    } else tool)
                 }
             }
         }
 
+        if (refused) parts.add(UIMessagePart.Text(DEEPSEEK_REFUSAL))
+        val message = UIMessage(role = MessageRole.ASSISTANT, parts = parts, annotations = annotations.distinct())
         return TextGenerationResult(
-            id = jsonObject["id"]?.jsonPrimitive?.contentOrNull ?: "",
-            model = jsonObject["model"]?.jsonPrimitive?.contentOrNull ?: "",
-            message = UIMessage(
-                role = MessageRole.ASSISTANT,
-                parts = parts,
-            ),
-            finishReason = jsonObject["status"]?.jsonPrimitive?.contentOrNull,
+            id = jsonObject.string("id").orEmpty(),
+            model = jsonObject.string("model").orEmpty(),
+            message = deepSeek?.bind(message, outputs, jsonObject.string("title").takeUnless { refused }) ?: message,
+            finishReason = if (refused) "content_filter" else status,
             usage = parseTokenUsage(jsonObject["usage"]?.jsonObject)
         )
     }
